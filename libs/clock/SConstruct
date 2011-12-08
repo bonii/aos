@@ -1,0 +1,5 @@
+Import("env")
+lib = env.MyLibrary("clock", LIBS=["c", "l4"])
+Return("lib")
+
+# vim:ft=python:

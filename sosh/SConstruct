@@ -1,0 +1,8 @@
+Import("*")
+
+sources=Split("sosh.c")
+obj = env.MyProgram("sosh", sources, LIBS=["sos","clock"])
+
+Return("obj")
+
+# vim: set filetype=python:
