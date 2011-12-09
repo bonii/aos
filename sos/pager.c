@@ -45,17 +45,20 @@ static int swap_file_size = 0;
 static int head_free_swap = 0;
 static int send = 1;
 
-static void writeToSwap(int index,int withoutReply,L4_ThreadId_t tid,L4_Fpage_t fpage) {
+static void writeToSwap(int index,int readSwapIndex,L4_ThreadId_t tid,L4_Fpage_t fpage) {
   if(!swapInitialised) {
     initialise_swap();
   }
   //Now we need to write the contents of pagetable index to swap file
   int swap_index = head_free_swap;
+  printf("Swap index %d",swap_index);
+
   head_free_swap = swap_table[head_free_swap].next_free;
-  if(swap_index >= MAX_SWAP_ENTRIES) {
+  if(swap_index >= MAX_SWAP_ENTRIES || swap_index < 0) {
     printf("Panic !!! Swap table full ! No more swapping possible!\n");
     return;
   }
+  printf("Here 222");
   if(swap_table[swap_index].offset == PTE_SENTINEL)  {
     swap_table[swap_index].offset = swap_file_size;
     swap_file_size += PAGESIZE;
@@ -68,6 +71,8 @@ static void writeToSwap(int index,int withoutReply,L4_ThreadId_t tid,L4_Fpage_t 
   page_table[index].being_updated = 1;
   page_table[index].write_bytes_transferred = 0;
   page_table[index].error_in_transfer = 0;
+  //Unmap before the first nfs write
+  L4_UnmapFpage(page_table[index].tid,page_table[index].pageNo);
 
   for(int i=0;i<PAGESIZE/NFS_WRITE_SIZE;i++) {
     //Set the token val
@@ -75,12 +80,13 @@ static void writeToSwap(int index,int withoutReply,L4_ThreadId_t tid,L4_Fpage_t 
     //printf("After malloc of page_token for i %d\n",i);
     token_val -> pageIndex = index;
     token_val -> swapIndex = swap_index;
-    token_val -> send_reply = !withoutReply;
+    token_val -> send_reply = (readSwapIndex == -1) ? 1 : 0 ;
     token_val -> chunk_index = i;
     token_val -> destination_tid = tid;
     token_val -> destination_page = fpage;
     token_val -> source_tid = page_table[index].tid;
     token_val -> source_page = page_table[index].pageNo;
+    token_val -> swapIndexToBeReadIn = readSwapIndex;
     int returnval = nfs_write(swapcookie,swap_table[swap_index].offset+i*NFS_WRITE_SIZE,NFS_WRITE_SIZE,(void *)(new_low + index*PAGESIZE + i*NFS_WRITE_SIZE),pager_write_callback,(uintptr_t)token_val);
     if (0) printf("nfs_write returned %d\n",returnval);
   }
@@ -89,27 +95,16 @@ static void writeToSwap(int index,int withoutReply,L4_ThreadId_t tid,L4_Fpage_t 
   printf("debug 10 ...");
 }
 
-static void readFromSwap(int swapIndex,int pagetableIndex, int withWriteToSwap, L4_ThreadId_t tid,L4_Fpage_t fpage) {
+static void readFromSwap(int swapIndex,int pagetableIndex, int writeToSwap,L4_ThreadId_t tid,L4_Fpage_t fpage) {
   if(!swapInitialised) {
     initialise_swap();
   }
   struct page_token *token_val;
   
-  if(withWriteToSwap) {
-    //Block until the last write finished
-    while(page_table[pagetableIndex].write_bytes_transferred != PAGESIZE) {
-      ;
-    }
-    if(page_table[pagetableIndex].error_in_transfer == 1) {
-      //There was an error, do error correction
-      page_table[pagetableIndex].being_updated = page_table[pagetableIndex].error_in_transfer = 0;
-      return;
-    }
-  }
-  
   //We are only here if there was no error in write or there was no write to swap done
   page_table[pagetableIndex].read_bytes_transferred = 0;
   page_table[pagetableIndex].being_updated = 1;
+  page_table[pagetableIndex].error_in_transfer = 0;
 
   for(int i=0;i<PAGESIZE/NFS_READ_SIZE;i++) {
     token_val = (struct page_token *) malloc(sizeof(struct page_token));  
@@ -118,9 +113,11 @@ static void readFromSwap(int swapIndex,int pagetableIndex, int withWriteToSwap, 
     //Read will always be the last to reply
     token_val -> send_reply = 1;
     token_val -> chunk_index = i;
-    token_val -> writeToSwapIssued = withWriteToSwap;
+    token_val -> writeToSwapIssued = writeToSwap;
     token_val -> destination_tid = tid;
     token_val -> destination_page = fpage;
+    token_val -> source_tid = page_table[pagetableIndex].tid;
+    token_val -> source_page = page_table[pagetableIndex].pageNo;
     //printf("Reading offset in file %d, pagetableIndex %d\n",swap_table[swapIndex].offset + i*NFS_READ_SIZE,pagetableIndex);
     nfs_read(swapcookie,swap_table[swapIndex].offset+i*NFS_READ_SIZE,NFS_READ_SIZE,pager_read_callback,(uintptr_t) token_val);
   }
@@ -131,13 +128,25 @@ static void readFromSwap(int swapIndex,int pagetableIndex, int withWriteToSwap, 
 //Returns the page table index to be evicted and the static variable 
 //ensures it remembers the last search index
 static int evictPage(void) {
+  static int evictIndex = 0;
+  int copyIndex = evictIndex;
+  int counter = 0;
   while(1) {
-    static int evictIndex = 0;
-    if((L4_ThreadNo(page_table[evictIndex].tid) == L4_ThreadNo(L4_nilthread)) || (page_table[evictIndex].referenced == 0 && page_table[evictIndex].being_updated == 0))
+    counter++;
+    if((L4_ThreadNo(page_table[evictIndex].tid) == L4_ThreadNo(L4_nilthread)) || (page_table[evictIndex].referenced == 0 && page_table[evictIndex].being_updated == 0 && page_table[evictIndex].pinned == 0))
       return evictIndex;
-    else if(page_table[evictIndex].being_updated == 0){
+    else if(page_table[evictIndex].being_updated == 0 && page_table[evictIndex].pinned == 0){
       page_table[evictIndex].referenced = 0;
       L4_UnmapFpage(page_table[evictIndex].tid,page_table[evictIndex].pageNo);
+    } else if (page_table[evictIndex].being_updated == 1) {
+      copyIndex = (copyIndex + 1) % numPTE;
+    }
+    if(counter == numPTE) {
+      if(copyIndex == evictIndex) {
+	return -1;
+      }
+      numPTE = 0;
+      copyIndex = evictIndex;
     }
     evictIndex = (evictIndex + 1) % numPTE;
   }
@@ -146,7 +155,8 @@ static int evictPage(void) {
 static L4_Word_t mapAddress(L4_ThreadId_t tid, L4_Fpage_t fpage, int swapIndex)
 {    
     // allocate a new frame
-  printf("debug 7 ....");
+    printf("debug 7 ....");
+    int evicted_not_dirty = 0;
     L4_Word_t physAddress = frame_alloc();
     printf("after debug 7...");
     int i = 0;
@@ -155,20 +165,22 @@ static L4_Word_t mapAddress(L4_ThreadId_t tid, L4_Fpage_t fpage, int swapIndex)
       printf("debug 3 ...");
       //int evicted = (L4_ThreadNo(tid) * fpage.X.b) % numPTE;
       int evicted = evictPage();
+      //If we aborted if all pages in page table are currently being updated
+      if(evicted == -1) {
+	return -1;
+      }
+
       printf("Woo hoo");
       if(page_table[evicted].dirty == 1) {
 	//We need to write it to swap
 	printf("debug 9 ...");
-        if(swapIndex != -1) {
-          //The read from swap will reply
-          writeToSwap(evicted,1,tid,fpage);
-        } else {
-          writeToSwap(evicted,0,tid,fpage);
-        }
+        writeToSwap(evicted,swapIndex,tid,fpage);
         L4_CacheFlushAll();
+      } else {
+	evicted_not_dirty = 1;
       }
       i = evicted;
-      physAddress = new_low + evicted * PAGESIZE;
+      //physAddress = new_low + evicted * PAGESIZE;
     } else {
       printf("physical address %lx new low %lx",physAddress,new_low);
       i = (physAddress - new_low)/PAGESIZE;
@@ -183,18 +195,21 @@ static L4_Word_t mapAddress(L4_ThreadId_t tid, L4_Fpage_t fpage, int swapIndex)
     page_table[i].pr_next = head_of_table;
     head_of_table = i;*/
     //most_recently_accessed = i;
-    if(swapIndex != -1) {
+    if(swapIndex != -1 && physAddress == 0) {
       //We need to read from the swap and overwrite the physical frame with it
-      readFromSwap(swapIndex,i,(physAddress == 0) ? 1:0,tid,fpage);
+      printf("Value of phys address %lx\n",physAddress);
+      //If the physical address returned by frame_alloc was 0 it means a page was evicted
+      readFromSwap(swapIndex,i,((physAddress == 0) ? 1 : 0 ),tid,fpage);
       L4_CacheFlushAll();
-    } else if(physAddress != 0) {
+    } else if(physAddress != 0 || evicted_not_dirty) {
+      printf("Foo Bar\n");
       //Page was not swapped out neither swapped in
      page_table[i].tid = tid;
      page_table[i].pageNo = fpage;
      page_table[i].being_updated = 0;
      page_table[i].referenced = 1;
      page_table[i].dirty = 0;
-     
+     send = 1;
      L4_Set_Rights(&fpage,L4_Readable);  
      L4_PhysDesc_t phys = L4_PhysDesc(new_low + i * PAGESIZE, L4_DefaultMemory);
      L4_MapFpage(tid, fpage,phys);
@@ -252,6 +267,7 @@ pager_init(L4_Word_t low, L4_Word_t high)
 	page_table[i].dirty = 0;
 	page_table[i].being_updated = 0;
 	page_table[i].error_in_transfer = 0;
+        page_table[i].pinned = 0;
     }
     
     for(int i=0;i<MAX_SWAP_ENTRIES;i++) {
@@ -339,20 +355,19 @@ void pager_write_callback(uintptr_t token, int status, fattr_t *attr) {
 	swap_table[swapIndex].tid = token_val -> source_tid;
 	swap_table[swapIndex].pageNo = token_val -> source_page;
 	//Unmap the fpage which got written out
-	L4_UnmapFpage(swap_table[swapIndex].tid,swap_table[swapIndex].pageNo);
-	L4_Set_Rights(&(token_val -> destination_page),L4_Readable);  
-	
 	if(token_val -> send_reply) {
 	  L4_PhysDesc_t phys = L4_PhysDesc(new_low + pageIndex * PAGESIZE, L4_DefaultMemory);
+          L4_Set_Rights(&(token_val -> destination_page),L4_Readable);  
 	  L4_MapFpage(token_val -> destination_tid, token_val -> destination_page,phys);
-	  L4_CacheFlushAll();
+ 	  L4_CacheFlushAll();
 	  page_table[pageIndex].tid = token_val -> destination_tid;
 	  page_table[pageIndex].pageNo = token_val -> destination_page;
 	  page_table[pageIndex].referenced = 1;
 	  page_table[pageIndex].dirty = 0;
 	} else {
 	  //There is a read coming up
-	  page_table[pageIndex].tid = L4_nilthread;
+	  //page_table[pageIndex].tid = L4_nilthread;
+          readFromSwap(token_val -> swapIndexToBeReadIn,pageIndex,1,token_val -> destination_tid,token_val -> destination_page);
 	}
 	//If there is a read after this it will copy the page_table contents
 	
@@ -364,7 +379,7 @@ void pager_write_callback(uintptr_t token, int status, fattr_t *attr) {
       swap_table[swapIndex].next_free = head_free_swap;
       head_free_swap = swapIndex;
     }
-    if(token_val -> send_reply) {
+    if(token_val -> send_reply || page_table[pageIndex].error_in_transfer) {
       //We clear the error in transfer value and being updated since the work is done
 
       page_table[pageIndex].being_updated = page_table[pageIndex].error_in_transfer = 0;
@@ -420,7 +435,9 @@ void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_re
       page_table[pagetableIndex].pageNo = token_val -> destination_page;
       page_table[pagetableIndex].referenced = 1;
       page_table[pagetableIndex].dirty = 0;
-      
+      if(token_val -> writeToSwapIssued) {
+        L4_UnmapFpage(token_val -> source_tid,token_val -> source_page);
+      }
       L4_Set_Rights(&(token_val -> destination_page),L4_Readable);  
       L4_PhysDesc_t phys = L4_PhysDesc(new_low + pagetableIndex * PAGESIZE, L4_DefaultMemory);
       L4_MapFpage(token_val -> destination_tid, token_val -> destination_page, phys);
