@@ -117,69 +117,6 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
     BUFFER_LOCK = 0;
 }
 
-/*static void blocking_send_buffered_input(L4_ThreadId_t tid,int nbyte) {
-    dprintf(2, "In buffered send\n");
-    char input;
-    int my_lock = 0;
-    while(BUFFER_LOCK) {
-      ;
-    }
-    BUFFER_LOCK = 1;
-    my_lock = 1;
-    for(int k=0;k<nbyte;k++) {
-      dprintf(2,"Byte value %d buffer-lock %d read_buffer size %d \n",k,BUFFER_LOCK,strlen(read_buffer));
-      //Wait if the buffer is empty, we will clear 1 character each time
-      while(strlen(read_buffer) == 0) {
-        //Release the lock
-        //dprintf(0,"Debug 0\n");
-        if(my_lock) {
-        BUFFER_LOCK = 0;
-          //Unset mylock
-          my_lock = 0;
-    }
-    //Need to add some delay here
-        for(int x=0;x<1000;x++);
-    while(BUFFER_LOCK) {
-        for(int x=0;x<1000000;x++);
-	dprintf(0,"Here\n");
-      ;
-    }
-    BUFFER_LOCK = 1;
-    my_lock = 1;
-      }
-      dprintf(2,"Debug 1\n");
-      input = read_buffer[0];
-      dprintf(2," Input is %c\n",input);
-      for(int m=0;m<BUFFER_SIZE;m++) {
-        read_buffer[m] = read_buffer[m+1];
-      }
-      dprintf(2,"Debug 2\n");
-      L4_MsgTag_t tag;
-      L4_Msg_t msg;
-      L4_MsgClear(&msg);
-      L4_Set_MsgMsgTag(&msg, L4_Niltag);
-      L4_Set_MsgLabel(&msg, 0);
-      L4_Word_t word = 0;
-      char* writeTo = (char*) &word;
-      writeTo[0] = input;
-      L4_MsgAppendWord(&msg, word);
-      L4_MsgLoad(&msg);
-      //dprintf(0, "sending input token %c to thread %d, %lx\n", input, token_table[i].read_threads[j], word);
-      dprintf(2,"Before message sent");
-      dprintf(2,"%lx %lx",L4_ThreadNo(tid),L4_ThreadNo(L4_Myself()));
-      tag = L4_Send(tid);
-      dprintf(2,"Message sent\n");
-      if(input == '\n') {
-    dprintf(2,"Debug 3\n");
-    BUFFER_LOCK = 0;
-    dprintf(2,"Exiting function\n");
-    return;
-      }
-    }
-  BUFFER_LOCK = 0;
-  return ;
-  }*/
-
 static int get_file_handle(char* filename, struct cookie* writeTo, int* size)
 {
     nfs_lookup(&mnt_point, filename, nfs_getcookie_callback, (uintptr_t) L4_Myself().raw);
