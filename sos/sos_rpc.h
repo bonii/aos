@@ -7,7 +7,7 @@
 #define MAX_TOKENS 10
 #define MAX_ACCESSES 5
 #define BUFFER_SIZE 50
-
+#define MAX_CONSOLE_READERS 1
 void rpc_thread(void);
 
 typedef struct {
@@ -28,4 +28,9 @@ typedef struct {
 
 Token_Access_t* get_access_from_token(int token);
 
+typedef struct {
+  L4_ThreadId_t tid;
+  int number_bytes_left;
+  unsigned read_enabled : 1;
+} read_listener_t;
 #endif

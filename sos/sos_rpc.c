@@ -15,6 +15,11 @@ static Token_Descriptor_t token_table[MAX_TOKENS];
 static L4_Msg_t msg;
 static L4_MsgTag_t tag;
 static L4_ThreadId_t tid;
+static read_listener_t console_listeners[MAX_CONSOLE_READERS];
+
+static int BUFFER_LOCK;
+
+static char read_buffer[BUFFER_SIZE];
 
 static int get_empty_token(void)
 {
@@ -45,38 +50,74 @@ Token_Access_t* get_access_from_token(int token) {
 }
 
 
-static int BUFFER_LOCK;
-
-static char read_buffer[BUFFER_SIZE];
 
 static void get_serial_port_input(struct serial * serial_port,char input) {
-    //dprintf(0, "got input token %c\n", input);
+  //dprintf(0, "got input token %c\n", input);
     char temp[2];
+    int i = 0;
     temp[0] = input;
     temp[1] = 0;
-    int i = 0;
     while (BUFFER_LOCK) {
         ;
     }
-    //Take the lock
-    BUFFER_LOCK = 1;
     //Now buffer it
+    BUFFER_LOCK = 1;
     if(strlen(read_buffer) + 1 == BUFFER_SIZE) {
       //We need to move things around in the buffer
       //Since we only get one character we need to
       //remove the first character
       for(i=0;i<BUFFER_SIZE;i++) {
-    read_buffer[i] = read_buffer[i+1];
+	read_buffer[i] = read_buffer[i+1];
       }
     } 
     //Copy character to the buffer  
     strcat(read_buffer,temp);
-    //dprintf(0,"read buffer is %s\n",read_buffer);
+
+    //Take the lock
+    int buffer_index_flushed = 0;
+    for(i=0;i<strlen(read_buffer);i++) {
+      //dprintf(0,"%c .. buffer",read_buffer[i]);
+      for(int j=0;j<MAX_CONSOLE_READERS;j++) {
+	if(L4_ThreadNo(console_listeners[j].tid) != L4_ThreadNo(L4_nilthread)
+	   && console_listeners[j].number_bytes_left > 0 
+	   && console_listeners[j].read_enabled) {
+
+	  //L4_MsgTag_t tag;
+	        L4_Msg_t msg1;
+		L4_MsgClear(&msg1);
+		L4_Set_MsgMsgTag(&msg1, L4_Niltag);
+		L4_Set_MsgLabel(&msg1, 0);
+		L4_Word_t word = 0;
+		char* writeTo = (char*) &word;
+		writeTo[0] = read_buffer[i];
+		L4_MsgAppendWord(&msg1, word);
+		L4_MsgLoad(&msg1);
+		dprintf(0,"Sending message to %lx %c\n",L4_ThreadNo(console_listeners[j].tid)
+			,read_buffer[i]);
+		L4_Send(console_listeners[j].tid);
+		dprintf(0,"After message sent \n:");
+		console_listeners[j].number_bytes_left--;
+		if(read_buffer[i] == '\n' || console_listeners[j].number_bytes_left == 0) {
+		  console_listeners[j].tid = L4_nilthread;
+		  console_listeners[j].number_bytes_left = 0;
+		}
+		buffer_index_flushed = i;
+	}
+      }
+    }
+      //Flush the buffer
+    int counter = 0;
+    for(i=buffer_index_flushed;i<BUFFER_SIZE;i++,counter++) {
+      read_buffer[counter] = read_buffer[buffer_index_flushed+counter+1];
+      
+    }
+    read_buffer[counter]=0;
+    dprintf(0,"read buffer is %s\n",read_buffer);
     //Release lock
     BUFFER_LOCK = 0;
 }
 
-static void blocking_send_buffered_input(L4_ThreadId_t tid,int nbyte) {
+/*static void blocking_send_buffered_input(L4_ThreadId_t tid,int nbyte) {
     dprintf(2, "In buffered send\n");
     char input;
     int my_lock = 0;
@@ -137,7 +178,8 @@ static void blocking_send_buffered_input(L4_ThreadId_t tid,int nbyte) {
     }
   BUFFER_LOCK = 0;
   return ;
-}
+  }*/
+
 static int get_file_handle(char* filename, struct cookie* writeTo, int* size)
 {
     nfs_lookup(&mnt_point, filename, nfs_getcookie_callback, (uintptr_t) L4_Myself().raw);
@@ -192,7 +234,7 @@ static int sos_rpc_get_token(void)
     uint8_t max_writers = 0;
     if (console)
     {
-        max_readers = 1;
+        max_readers = MAX_CONSOLE_READERS;
         max_writers = MAX_ACCESSES;
     } else {
         max_readers = MAX_ACCESSES;
@@ -492,7 +534,20 @@ static int sos_rpc_read(void)
         {
             //Now we need to check for the handler
             //Now we need to block and flush buffer
-            blocking_send_buffered_input(tid,bytes);
+	    //Register it for messages
+	    while(BUFFER_LOCK) {
+	        ;
+	    }
+	    BUFFER_LOCK = 1;
+	    for(int i=0;i<MAX_CONSOLE_READERS;i++) {
+	      if(L4_ThreadNo(console_listeners[i].tid) == L4_ThreadNo(L4_nilthread)) {
+		console_listeners[i].tid = tid;
+		console_listeners[i].number_bytes_left = bytes;
+		console_listeners[i].read_enabled = 1;
+	      }
+	    }
+	    BUFFER_LOCK = 0;
+	      //blocking_send_buffered_input(tid,bytes);
         } else {
             // delegate this to nfs_read
             // TODO: position
@@ -590,6 +645,13 @@ void rpc_thread(void)
     }
     
     int send = 0;
+
+    //Initialise read listener buffer
+    for(int i=0;i<MAX_CONSOLE_READERS;i++) {
+      console_listeners[i].tid = L4_nilthread;
+      console_listeners[i].number_bytes_left = 0;
+      console_listeners[i].read_enabled = 0;
+    }
     
     for(;;) {
     if (!send)

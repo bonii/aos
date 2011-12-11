@@ -135,15 +135,16 @@ int read(fildes_t file, char *buf, size_t nbyte)
     for (i = 0; i < nbyte; i++)
     {
       //printf("waiting for byte number %d\n", i);
-        if (result == SOS_READ_CONSOLE)
-            tag = L4_Receive(rpc_threadId);
-        else // result == SOS_READ_FILE
-            tag = L4_Receive(root_threadId);
+      //L4_Accept(L4_UntypedWordsAcceptor);
+        tag = L4_Receive(root_threadId);
+	//printf("Baz");
         L4_MsgStore(tag, &msg);
+	//printf("Received character %c\n",buf[i]);
         if (L4_Label(tag) > 0 ) break;
         assert(tag.X.u == 1);
         L4_Word_t word = L4_MsgWord(&msg, 0);
         buf[i] = ((char*) &word)[0];
+
         //buf[i] = (char) word;
         //printf("the word %lx characters are '%c' '%c' '%c' '%c' \n", tmp, ((char*) &tmp)[0], ((char*) &tmp)[1], ((char*) &tmp)[2], ((char*) &tmp)[3]);
         //printf("got character '%c', word: %lx\n", buf[i], word);
@@ -154,6 +155,7 @@ int read(fildes_t file, char *buf, size_t nbyte)
         }
     }
     //printf("i: %d buffer: %s\n", i, buf);
+    //printf("Am here");
     long end = time_stamp();
     if (0 && (result != SOS_READ_CONSOLE)) printf("Time for reading %d bytes is %ld\n",i,(end-start));
     return i;

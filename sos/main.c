@@ -225,12 +225,12 @@ main (void)
     sos_find_memory(&low, &high);
     dprintf(0, "Available memory from 0x%08lx to 0x%08lx - %luMB\n", 
 	   low, high, (high - low) / ONE_MEG);
-	L4_Word_t new_high = low + HEAP_SIZE + 2 * PAGESIZE;
-	dprintf(0, "initializing frame manager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, new_high);
+    //L4_Word_t new_high = low + HEAP_SIZE + 2 * PAGESIZE;
+	dprintf(0, "initializing frame manager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
 
-    frame_init(low + HEAP_SIZE, new_high);
-	dprintf(0, "initializing pager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, new_high);
-    L4_Word_t new_low = pager_init((low + HEAP_SIZE), new_high);
+    frame_init(low + HEAP_SIZE, high);
+	dprintf(0, "initializing pager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
+    L4_Word_t new_low = pager_init((low + HEAP_SIZE), high);
     set_new_low(new_low);
 
     dprintf(0, "frame manager initialized\n");

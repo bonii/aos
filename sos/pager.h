@@ -27,6 +27,7 @@ typedef struct {
     int read_bytes_transferred;
     unsigned being_updated : 1;
     unsigned error_in_transfer : 1;
+    unsigned pinned : 1;
   //int pr_next; //It points to the next accessed entry 
 } sos_PTE;
 
@@ -44,6 +45,8 @@ struct page_token{
   L4_Fpage_t source_page;
   int pageIndex;
   int swapIndex;
+
+  int swapIndexToBeReadIn;
   int chunk_index;
   unsigned send_reply : 1;
   unsigned writeToSwapIssued :1;
