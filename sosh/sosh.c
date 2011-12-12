@@ -34,7 +34,7 @@ prstat(const char *name)
 }
 
 static int thrash(int argc, char **argv) {
-  size_t buf_size = 8 * 1024;
+  size_t buf_size = 2 * 1024;
   char *buf = (char *) 0x2000000;
   for (size_t i = 0; i < buf_size; ++i) {
     buf[i] = i % 26 + 'A';
@@ -296,7 +296,9 @@ main(void)
     printf("token value :%d\n",in1);
     close(in1);
     assert (in >= 0);*/
-    
+    close(in);
+    in = open("console", O_RDWR);
+    assert(in >= 0);
     bp   = buf;
     done = 0;
     new  = 1;

@@ -57,6 +57,8 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
     int i = 0;
     temp[0] = input;
     temp[1] = 0;
+    L4_Word_t word = 0;
+    char* writeTo = (char*) &word;
     while (BUFFER_LOCK) {
         ;
     }
@@ -87,8 +89,6 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
 		L4_MsgClear(&msg1);
 		L4_Set_MsgMsgTag(&msg1, L4_Niltag);
 		L4_Set_MsgLabel(&msg1, 0);
-		L4_Word_t word = 0;
-		char* writeTo = (char*) &word;
 		writeTo[0] = read_buffer[i];
 		L4_MsgAppendWord(&msg1, word);
 		L4_MsgLoad(&msg1);
@@ -388,6 +388,21 @@ static int sos_rpc_release_token(void)
     int found = -1;
     int access_index = get_access_index_from_token(token);
     Token_Access_t* access = get_access_from_token(token);
+    //If it is a console reader deregister it
+    while(BUFFER_LOCK) {
+      ;
+    }
+    BUFFER_LOCK = 1;
+    if(strcmp(token_table[index].filename,"console") == 0) {
+      for(int i=0;i<MAX_CONSOLE_READERS;i++) {
+        if(L4_ThreadNo(console_listeners[i].tid) == L4_ThreadNo(access->tid)) {
+          console_listeners[i].tid = L4_nilthread;
+          console_listeners[i].read_enabled = 0;
+          console_listeners[i].number_bytes_left = 0;
+        }
+      }
+    }
+    BUFFER_LOCK = 0;
     if(access_index < MAX_ACCESSES && access->tid.raw == tid.raw) {
         found = 0;
         //decrement relevant counters
@@ -401,7 +416,6 @@ static int sos_rpc_release_token(void)
             token_table[index].accesses[j] = token_table[index].accesses[j+1];
         }
     }
-
     //Construct the message and send the found value
     L4_MsgClear(&msg);
     L4_Set_MsgMsgTag(&msg, L4_Niltag);
