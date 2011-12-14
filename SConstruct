@@ -67,10 +67,11 @@ else:
 # tools that need to get loaded and run in your context.  Do that by calling
 # the Application function a number times in the app_env environment.
 app = app_env.Application(app_name)
+app1 = app_env.Application("hi")
 
 # Bootimage takes a comma seperated list of Applications that are linked
 # together into a single bootimg.bin binary.
-bootimg = env.Bootimage(l4kernel, sos, app)
+bootimg = env.Bootimage(l4kernel, sos, app,app1)
 
 Default(bootimg) # Default build target is the bootimage.
 

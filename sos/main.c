@@ -40,8 +40,8 @@ static L4_Word_t init_stack_address = 0x9000000;
 static L4_Word_t user_stack_address = 0x8000000;
 static L4_Word_t rpc_stack_address  = 0x7500000;
 static L4_BootRec_t* binfo_rec = 0;
-
 static L4_ThreadId_t rpc_threadId;
+static L4_BootRec_t* binfo_rec_list[MAX_EXECUTABLES_IN_IMAGE];
 
 // Init thread - This function starts up our device drivers and runs the first
 // user program.
@@ -54,12 +54,15 @@ init_thread(void)
     initialise_swap();
     printf("Initialised swap");
     // Loop through the BootInfo starting executables
-    int i;
+    int i,counter;
     L4_Word_t task = 0;
-    for (i = 1; (binfo_rec = sos_get_binfo_rec(i)); i++) {
+    for (i = 1,counter=0; (binfo_rec = sos_get_binfo_rec(i)); i++) {
 	if (L4_BootRec_Type(binfo_rec) != L4_BootInfo_SimpleExec)
 	    continue;
-
+	if(strcmp(L4_SimpleExec_Cmdline(binfo_rec),"sosh") != 0) {
+	  binfo_rec_list[counter++] = binfo_rec;
+	  continue;
+	}
 	// Must be a SimpleExec boot info record
 	dprintf(0, "Found exec: %d %s\n", i, L4_SimpleExec_Cmdline(binfo_rec));
 
@@ -77,7 +80,8 @@ init_thread(void)
 	L4_SimpleExec_BssVstart(binfo_rec),
 	L4_SimpleExec_BssPstart(binfo_rec));*/
     }
-
+    //set_address_and_binfo(binfo_rec_list,user_stack_address,counter);
+    //stack_address = user_stack_address;
     // Thread finished - block forever
     for (;;)
 	sos_usleep(30 * 1000 * 1000);

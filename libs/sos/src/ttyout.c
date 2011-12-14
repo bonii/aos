@@ -169,12 +169,12 @@ sos_read(void *vData, long int position, size_t count, void *handle)
 	return count;
 }
 
-void
+/*void
 abort(void)
 {
-	L4_KDB_Enter("sos abort()ed");
-	while(1); /* We don't return after this */
-}
+L4_KDB_Enter("sos abort()ed");*/
+//while(1); /* We don't return after this */
+/*}
 
-void _Exit(int status) { abort(); }
+  void _Exit(int status) { abort(); }*/
 

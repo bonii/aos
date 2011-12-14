@@ -261,17 +261,48 @@ int stat(const char *path, stat_t *buf)
 
 pid_t process_create(const char *path)
 {
-    return 0;
+    L4_Msg_t msg;
+    L4_MsgTag_t tag;
+    int result = send_in_one_message(rpc_threadId, SOS_RPC_PROCESS_CREATE, path, strlen(path));
+    pid_t pid_process = -1;
+    if(result != -1) {
+        L4_Accept(L4_UntypedWordsAcceptor);
+        //The message was successfully sent, receive the process id from the rpc thread
+        tag = L4_Receive(rpc_threadId);
+	L4_MsgStore(tag,&msg);
+	pid_process = (pid_t) L4_MsgWord(&msg,0);
+    }
+    return pid_process;
 }
 
 int process_delete(pid_t pid)
 {
-    return 0;
+    L4_Msg_t msg;
+    L4_MsgTag_t tag;
+    L4_MsgClear(&msg);
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_PROCESS_DELETE));
+    L4_MsgAppendWord(&msg,pid);
+    L4_MsgLoad(&msg);
+    tag = L4_Call(rpc_threadId);
+    L4_MsgStore(tag,&msg);
+    int returnval = L4_MsgWord(&msg,0);
+    return returnval;
 }
 
 pid_t my_id(void)
 {
-    return 0;
+    L4_Msg_t msg;
+    L4_MsgClear(&msg);
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_PROCESS_ID));
+    L4_MsgLoad(&msg);
+    L4_MsgTag_t tag;
+    tag = L4_Call(rpc_threadId);
+    if(L4_IpcFailed(tag)) {
+      return -1;
+    }
+    L4_MsgStore(tag, &msg);
+    pid_t pid_process = (pid_t) L4_MsgWord(&msg,0);
+    return pid_process;
 }
 
 int process_status(process_t *processes, unsigned max)
