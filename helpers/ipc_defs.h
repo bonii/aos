@@ -25,6 +25,11 @@
 #define SOS_RPC_WRITE_PERMS                  ((L4_Word_t) 14)
 #define SOS_SYSCALL_TIMESTAMP                ((L4_Word_t) 15)
 #define SOS_SYSCALL_SLEEP                    ((L4_Word_t) 16)
+#define SOS_RPC_PROCESS_CREATE               ((L4_Word_t) 17)
+#define SOS_RPC_PROCESS_WAIT                 ((L4_Word_t) 18)
+#define SOS_RPC_PROCESS_DELETE                 ((L4_Word_t) 19)
+#define SOS_RPC_PROCESS_STAT                 ((L4_Word_t) 20)
+#define SOS_RPC_PROCESS_ID                   ((L4_Word_t) 21)
 
 #define GETDIRENT_VALID_FILE                 ((L4_Word_t) 1)
 #define GETDIRENT_FIRST_EMPTY_FILE           ((L4_Word_t) 2)

@@ -291,12 +291,12 @@ main(void)
     
     
     in = open("console", O_RDWR);
-    /*    printf("token value :%d\n",in);
+    printf("token value :%d\n",in);
     fildes_t in1 = open("console",O_WRONLY);
     printf("token value :%d\n",in1);
     close(in1);
-    assert (in >= 0);*/
-    close(in);
+    assert (in >= 0);
+      close(in);
     in = open("console", O_RDWR);
     assert(in >= 0);
     bp   = buf;
