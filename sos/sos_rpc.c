@@ -317,6 +317,16 @@ static int sos_rpc_get_token(void)
             access->write_offset = 0;
             access->read_offset = 0;
             access->mode = mode;
+
+	    //Set the entry in the process table
+	    int index_val = get_pid_from_table(tid);
+	    if(index_val >= 0 && index_val < MAX_PROCESSES) {
+	      for(int i=0;i<MAX_TOKENS;i++) {
+		if(process_table[index_val].token_table[i] == -1)
+		  process_table[index_val].token_table[i] = token;
+	      }
+	    }
+	    
         }
     }
     if(console && read_encountered && token != -1) {
@@ -492,6 +502,14 @@ static int sos_rpc_release_token(void)
     //Get the token number from the message which is my index into the datastructure
     //Construct the message and send the found value
     int found = close_file_descriptor(token);
+    int index_val = get_pid_from_table(tid);
+    //Release it from token table
+    if(index_val >= 0 && index_val < MAX_PROCESSES) {
+      for(int i=0;i<MAX_TOKENS;i++) {
+	if(process_table[index_val].token_table[i] == token)
+	  process_table[index_val].token_table[i] = -1;
+      }
+    }
     L4_MsgClear(&msg);
     L4_Set_MsgMsgTag(&msg, L4_Niltag);
     L4_MsgAppendWord(&msg, found);
@@ -676,9 +694,9 @@ static int sos_rpc_process_delete(void) {
 	      L4_MsgClear(&msg1);
 	      L4_Set_MsgMsgTag(&msg1, L4_Niltag);
 	      L4_MsgAppendWord(&msg1, pid_kill);
-	      L4_MsgLoad(&msg);
+	      L4_MsgLoad(&msg1);
 	      tag1 = L4_Reply(process_table[pid_kill].waiting_tid[i]);
-	      if(L4_IpcFailed(tag)) {
+	      if(L4_IpcFailed(tag1)) {
 		returnval = -1;
 		break;
 	      }
@@ -690,9 +708,9 @@ static int sos_rpc_process_delete(void) {
        	      L4_MsgClear(&msg1);
 	      L4_Set_MsgMsgTag(&msg1, L4_Niltag);
 	      L4_MsgAppendWord(&msg1, pid_kill);
-	      L4_MsgLoad(&msg);
+	      L4_MsgLoad(&msg1);
 	      tag1 = L4_Reply(any_process_list[i]);
-	      if(!L4_IpcFailed(tag)) {
+	      if(!L4_IpcFailed(tag1)) {
                 any_process_list[i] = L4_nilthread;
 	      }
         }
@@ -703,6 +721,12 @@ static int sos_rpc_process_delete(void) {
 	process_table[pid_kill].size = 0;
 	process_table[pid_kill].stime = 0;
 	strcpy(process_table[pid_kill].command,"");
+	//Now remove the entries from the pagetable for the process
+	L4_MsgClear(&msg1);
+	L4_Set_MsgLabel(&msg1,MAKETAG_SYSLAB(SOS_SYSCALL_REMOVE_TID_PAGE));
+	L4_MsgAppendWord(&msg1,tid.raw);
+	L4_MsgLoad(&msg1);
+	L4_Send(L4_Pager());
       }
     } else {
       returnval = -1; 

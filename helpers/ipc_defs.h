@@ -34,6 +34,7 @@
 #define SEND_STAT_COMMAND                     ((L4_Word_t) 22)
 #define SEND_STAT_DATA                        ((L4_Word_t) 23)
 #define SEND_STAT_END                         ((L4_Word_t) 24)
+#define SOS_SYSCALL_REMOVE_TID_PAGE           ((L4_Word_t) 25)
 
 #define GETDIRENT_VALID_FILE                 ((L4_Word_t) 1)
 #define GETDIRENT_FIRST_EMPTY_FILE           ((L4_Word_t) 2)

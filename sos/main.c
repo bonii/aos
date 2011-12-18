@@ -179,6 +179,11 @@ syscall_loop(void)
 	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
   	    L4_MsgAppendWord(&msg, threadNo);
 	    L4_MsgLoad(&msg);
+	    break;
+	case SOS_SYSCALL_REMOVE_TID_PAGE :
+	  dprintf(0, "Unmap received for process kill");
+	  send = 0;
+	  unmap_process((L4_ThreadId_t) L4_MsgWord(&msg,0));
 	  break;
 	/* error? */
 	default:

@@ -9,6 +9,7 @@ extern void initialise_swap(void);
 extern void initialise_swap_callback(uintptr_t token,int status,struct cookie *fh,fattr_t *attr);
 extern void pager_write_callback(uintptr_t token,int status, fattr_t *attr);
 extern void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_read,char *data);
+extern void unmap_process(L4_ThreadId_t tid_killed);
 
 #define PTE_SENTINEL -1
 #define UNDEFINED_MEMORY -1
