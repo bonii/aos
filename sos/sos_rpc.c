@@ -668,26 +668,24 @@ static int sos_rpc_getdirent(void)
 static int sos_rpc_process_delete(void) {
     int pid_kill = (int) L4_MsgWord(&msg,0);
     dprintf(0,"Got a process delete %d %lx",pid_kill,L4_ThreadNo(tid));
-    int returnval = 0;
     L4_Msg_t msg1;
     L4_MsgTag_t tag1;
     L4_ThreadId_t tid_kill = L4_nilthread;
+    int returnval = -1;
     if(pid_kill >=0 && pid_kill < MAX_PROCESSES 
        && L4_ThreadNo(process_table[pid_kill].tid) != L4_ThreadNo(L4_nilthread)) {
       //Send message all the 
       tid_kill = process_table[pid_kill].tid;
       int killval = sos_delete_task(tid_kill,L4_Pager());
+      returnval = 0;
       dprintf(0,"Returnval of process kill is %d\n",killval);
       for(int i=0;i<MAX_TOKENS;i++) {
 	if(process_table[pid_kill].token_table[i] != -1) {
-	  int returnval = close_file_descriptor(process_table[pid_kill].token_table[i]);
-	  if(returnval == -1) {
-	    break;
-	  }
+	  close_file_descriptor(process_table[pid_kill].token_table[i]);
 	  process_table[pid_kill].token_table[i] = -1;
 	}
       }
-      for(int i=0;i<MAX_WAITING_TID && returnval != -1;i++) {
+      for(int i=0;i<MAX_WAITING_TID;i++) {
 	if(L4_ThreadNo(process_table[pid_kill].waiting_tid[i]) 
 	   != L4_ThreadNo(L4_nilthread)) {
 	  //Send a message to it so that its process_create or process_wait calls can receive
@@ -697,13 +695,13 @@ static int sos_rpc_process_delete(void) {
 	      L4_MsgLoad(&msg1);
 	      tag1 = L4_Reply(process_table[pid_kill].waiting_tid[i]);
 	      if(L4_IpcFailed(tag1)) {
-		returnval = -1;
-		break;
+		dprintf(0,"Failed to reply to waiting tid %lx",process_table[pid_kill].waiting_tid[i]);
 	      }
+	      process_table[pid_kill].waiting_tid[i] = L4_nilthread;
 	}
       }
       //We do not signal returnval failure here
-      for(int i=0;i<MAX_PROCESSES && returnval != -1;i++) {
+      for(int i=0;i<MAX_PROCESSES;i++) {
         if(L4_ThreadNo(any_process_list[i]) != L4_ThreadNo(L4_nilthread)) {
        	      L4_MsgClear(&msg1);
 	      L4_Set_MsgMsgTag(&msg1, L4_Niltag);
@@ -715,21 +713,17 @@ static int sos_rpc_process_delete(void) {
 	      }
         }
       }
-      if(returnval == 0) {
 	//Sucessful close
-	process_table[pid_kill].tid = L4_nilthread;
-	process_table[pid_kill].size = 0;
-	process_table[pid_kill].stime = 0;
-	strcpy(process_table[pid_kill].command,"");
+      process_table[pid_kill].tid = L4_nilthread;
+      process_table[pid_kill].size = 0;
+      process_table[pid_kill].stime = 0;
+      strcpy(process_table[pid_kill].command,"");
 	//Now remove the entries from the pagetable for the process
-	L4_MsgClear(&msg1);
-	L4_Set_MsgLabel(&msg1,MAKETAG_SYSLAB(SOS_SYSCALL_REMOVE_TID_PAGE));
-	L4_MsgAppendWord(&msg1,tid.raw);
-	L4_MsgLoad(&msg1);
-	L4_Send(L4_Pager());
-      }
-    } else {
-      returnval = -1; 
+      L4_MsgClear(&msg1);
+      L4_Set_MsgLabel(&msg1,MAKETAG_SYSLAB(SOS_SYSCALL_REMOVE_TID_PAGE));
+      L4_MsgAppendWord(&msg1,tid.raw);
+      L4_MsgLoad(&msg1);
+      L4_Send(L4_Pager());
     }
     //If the process to be killed invoked process_delete on itself we will not reply back
     if(L4_ThreadNo(tid_kill) == L4_ThreadNo(tid)) {
@@ -801,7 +795,10 @@ static int sos_rpc_process_stat(void) {
 	//We need to send the message
 	count++;
 	returnval = send_in_one_message(tid,SEND_STAT_COMMAND,process_table[i].command,strlen(process_table[i].command));
-	L4_Receive(tid);
+	tag = L4_Receive(tid);
+	if(L4_IpcFailed(tag)) {
+	  return 0;
+	}
 	L4_MsgClear(&msg);
 	L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SEND_STAT_DATA));
 	//Pid value
@@ -810,7 +807,10 @@ static int sos_rpc_process_stat(void) {
 	L4_MsgAppendWord(&msg, process_table[i].stime/1000);
 	L4_MsgAppendWord(&msg, (time_stamp() - process_table[i].stime)/1000);
 	L4_MsgLoad(&msg);
-	L4_Call(tid);
+	tag = L4_Call(tid);
+	if(L4_IpcFailed(tag)) {
+	  return 0;
+	}
       }
     }
     //Now we need to send an end message
@@ -848,12 +848,9 @@ static int sos_rpc_process_create(void) {
         //L4_KDB_Enter("Blahhhh");
         process_table[index].tid = newtid;
         strcpy(process_table[index].command,execname); 
-        /*for(int k=0;k<MAX_WAITING_TID;k++) {
-          if(L4_ThreadNo(process_table[index].waiting_tid[k]) == L4_ThreadNo(L4_nilthread)) {
-            process_table[index].waiting_tid[k] = tid;
-            break;
-          }
-          }*/
+        for(int k=0;k<MAX_WAITING_TID;k++) {
+            process_table[index].waiting_tid[k] = L4_nilthread;
+        }
         errorFlag = 0;
         break;
       }
@@ -862,7 +859,6 @@ static int sos_rpc_process_create(void) {
     if(!errorFlag) {
       pid = index;
     }
-    dprintf(0,"Here 2");
     L4_MsgClear(&msg);
     L4_MsgAppendWord(&msg, pid);
     L4_MsgLoad(&msg);

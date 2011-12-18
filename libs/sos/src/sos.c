@@ -59,9 +59,9 @@ fildes_t open(const char *path, fmode_t mode)
 { 
   /* Generate a message for the kernel for the token */
   long start = time_stamp();
-    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread))
+   while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
-    
+   }
     char file_name_mode[FILE_NAME_MODE_SIZE];
     for (int i = 0; i < FILE_NAME_MODE_SIZE; i++)
     {
@@ -94,9 +94,9 @@ fildes_t open(const char *path, fmode_t mode)
 int close(fildes_t file)
 {
     int success = 0;
-    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread))
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
-    
+    }
     L4_Msg_t msg;
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_RELEASE_TOKEN));
