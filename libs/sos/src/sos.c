@@ -114,6 +114,9 @@ int close(fildes_t file)
 
 int read(fildes_t file, char *buf, size_t nbyte)
 {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     long start = time_stamp();
     L4_Msg_t msg;
     L4_MsgTag_t tag;
@@ -165,7 +168,10 @@ int read(fildes_t file, char *buf, size_t nbyte)
 
 int write(fildes_t file, const char *buf, size_t nbyte)
 {
-  long start = time_stamp();
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
+    long start = time_stamp();
     L4_Msg_t msg;
     L4_MsgTag_t tag;
     L4_MsgClear(&msg);
@@ -194,6 +200,9 @@ int write(fildes_t file, const char *buf, size_t nbyte)
 
 int getdirent(int pos, char *name, size_t nbyte)
 {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     // set to 0
     for (int i = 0; i < nbyte; i++)
         name[i] = 0;
@@ -245,6 +254,9 @@ int getdirent(int pos, char *name, size_t nbyte)
 
 int stat(const char *path, stat_t *buf)
 {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     send_in_one_message(rpc_threadId, SOS_RPC_STAT, path, strlen(path)+1);
     L4_Msg_t msg;
     L4_MsgTag_t tag = L4_Receive(root_threadId);
@@ -263,7 +275,7 @@ int stat(const char *path, stat_t *buf)
 
 pid_t process_create(const char *path)
 {
-    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
     }
     L4_Msg_t msg;
@@ -281,7 +293,7 @@ pid_t process_create(const char *path)
 
 int process_delete(pid_t pid)
 {
-    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
     }
     L4_Msg_t msg;
@@ -301,7 +313,7 @@ int process_delete(pid_t pid)
 
 pid_t my_id(void)
 {
-    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
     }
     L4_Msg_t msg;
@@ -318,7 +330,7 @@ pid_t my_id(void)
 
 int process_status(process_t *processes, unsigned max)
 {
-    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
        sos_init();
     }
     L4_Msg_t msg;
@@ -359,7 +371,7 @@ int process_status(process_t *processes, unsigned max)
 
 pid_t process_wait(pid_t pid)
 {
-    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
     }
     L4_Msg_t msg;
@@ -379,13 +391,16 @@ pid_t process_wait(pid_t pid)
 
 long time_stamp(void)
 {
+    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     L4_Msg_t msg;
     L4_MsgClear(&msg);
-    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_SYSCALL_TIMESTAMP));
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_TIMESTAMP));
     L4_MsgLoad(&msg);
     L4_MsgTag_t tag;
     L4_Accept(L4_UntypedWordsAcceptor);
-    tag = L4_Call(root_threadId);
+    tag = L4_Call(rpc_threadId);
     if (L4_IpcFailed(tag)) {
       //printf("error in gettimestamp IPC\n");
         return -1;
@@ -402,12 +417,12 @@ void sleep(int msec)
     // TODO: blocks forever for now
     L4_Msg_t msg;
     L4_MsgClear(&msg);
-    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_SYSCALL_SLEEP));
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_SLEEP));
     L4_MsgAppendWord(&msg,(L4_Word_t) msec);
     L4_MsgLoad(&msg);
     L4_MsgTag_t tag;
     L4_Accept(L4_UntypedWordsAcceptor);
-    tag = L4_Call(root_threadId);
+    tag = L4_Call(rpc_threadId);
     L4_MsgStore(tag,&msg);
     int sleep_registered = (int) L4_MsgWord(&msg,0);
     if(!sleep_registered) {

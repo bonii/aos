@@ -438,7 +438,7 @@ static int close_file_descriptor(int token) {
     int access_index = get_access_index_from_token(token);
     Token_Access_t* access = get_access_from_token(token);
     //If it is a console reader deregister it
-    dprintf(0,"IReplying to tid %lx",L4_ThreadNo(tid));
+    dprintf(2,"IReplying to tid %lx",L4_ThreadNo(tid));
     while(BUFFER_LOCK) {
       ;
     }
@@ -452,7 +452,7 @@ static int close_file_descriptor(int token) {
         }
       }
     }
-    dprintf(0,"IReplying to tid %lx",L4_ThreadNo(tid));
+    dprintf(2,"IReplying to tid %lx",L4_ThreadNo(tid));
     BUFFER_LOCK = 0;
     if(access_index < MAX_ACCESSES && access->tid.raw == tid.raw) {
         found = 0;
@@ -467,7 +467,7 @@ static int close_file_descriptor(int token) {
             token_table[index].accesses[j] = token_table[index].accesses[j+1];
         }
     }
-    dprintf(0,"Replying to tid %lx",L4_ThreadNo(tid));
+    dprintf(2,"Replying to tid %lx",L4_ThreadNo(tid));
     return found;
 }
 
@@ -934,6 +934,24 @@ void rpc_thread(void)
             break;
         case SOS_RPC_PROCESS_STAT:
 	    send = sos_rpc_process_stat();
+	    break;
+	case SOS_RPC_TIMESTAMP:
+          //dprintf(0, "timestamp message called\n");
+	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
+	    timestamp_t timeval = time_stamp();
+	    //dprintf(0,"Time stamp obtained %llu",timeval);
+  	    L4_MsgAppendWord(&msg, timeval/TIME_SPLIT);
+	    L4_MsgAppendWord(&msg, timeval%TIME_SPLIT);
+	    L4_MsgLoad(&msg);
+	    break;
+	case SOS_RPC_SLEEP:
+            dprintf(0, "sleep message called\n");
+	    int delay = (int) L4_MsgWord(&msg,0);
+	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
+	    dprintf(0,"Delay is %d\n",delay);
+	    int returnval = register_timer(delay*1000,tid);
+  	    L4_MsgAppendWord(&msg, returnval);
+	    L4_MsgLoad(&msg);
 	    break;
        default:
             // Unknown system call, so we don't want to reply to this thread

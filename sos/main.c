@@ -41,7 +41,6 @@ static L4_Word_t user_stack_address = 0x8000000;
 static L4_Word_t rpc_stack_address  = 0x7500000;
 static L4_BootRec_t* binfo_rec = 0;
 static L4_ThreadId_t rpc_threadId;
-static L4_BootRec_t* binfo_rec_list[MAX_EXECUTABLES_IN_IMAGE];
 
 // Init thread - This function starts up our device drivers and runs the first
 // user program.
@@ -54,15 +53,12 @@ init_thread(void)
     initialise_swap();
     printf("Initialised swap");
     // Loop through the BootInfo starting executables
-    int i,counter;
+    int i;
     L4_Word_t task = 0;
-    for (i = 1,counter=0; (binfo_rec = sos_get_binfo_rec(i)); i++) {
-	if (L4_BootRec_Type(binfo_rec) != L4_BootInfo_SimpleExec)
+    for (i = 1; (binfo_rec = sos_get_binfo_rec(i)); i++) {
+	if (L4_BootRec_Type(binfo_rec) != L4_BootInfo_SimpleExec && 
+	    strcmp(L4_SimpleExec_Cmdline(binfo_rec),"sosh") != 0)
 	    continue;
-	if(strcmp(L4_SimpleExec_Cmdline(binfo_rec),"sosh") != 0) {
-	  binfo_rec_list[counter++] = binfo_rec;
-	  continue;
-	}
 	// Must be a SimpleExec boot info record
 	dprintf(0, "Found exec: %d %s\n", i, L4_SimpleExec_Cmdline(binfo_rec));
 
@@ -179,29 +175,11 @@ syscall_loop(void)
 	    dprintf(2, "find_rpc_thread called\n");
 	    L4_Word_t threadNo = rpc_threadId.raw;
 	    dprintf(2, "returning id %ld\n", threadNo);
-        L4_MsgClear(&msg);
+	    L4_MsgClear(&msg);
 	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
   	    L4_MsgAppendWord(&msg, threadNo);
 	    L4_MsgLoad(&msg);
 	  break;
-	case SOS_SYSCALL_TIMESTAMP:
-          //dprintf(0, "timestamp message called\n");
-	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
-	    timestamp_t timeval = time_stamp();
-	    //dprintf(0,"Time stamp obtained %llu",timeval);
-  	    L4_MsgAppendWord(&msg, timeval/TIME_SPLIT);
-	    L4_MsgAppendWord(&msg, timeval%TIME_SPLIT);
-	    L4_MsgLoad(&msg);
-	    break;
-	case SOS_SYSCALL_SLEEP:
-            dprintf(0, "sleep message called\n");
-	    int delay = (int) L4_MsgWord(&msg,0);
-	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
-	    dprintf(0,"Delay is %d\n",delay);
-	    int returnval = register_timer(delay*1000,tid);
-  	    L4_MsgAppendWord(&msg, returnval);
-	    L4_MsgLoad(&msg);
-	    break;
 	/* error? */
 	default:
 	    // Unknown system call, so we don't want to reply to this thread
