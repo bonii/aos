@@ -63,10 +63,11 @@ app_env.AddLibrary("sos")
 # the Application function a number times in the app_env environment.
 sosh = app_env.Application("sosh")
 hi = app_env.Application("hi")
+test1 = app_env.Application("test1")
 
 # Bootimage takes a comma seperated list of Applications that are linked
 # together into a single bootimg.bin binary.
-bootimg = env.Bootimage(l4kernel, sos,sosh,hi)
+bootimg = env.Bootimage(l4kernel, sos,sosh,hi, test1)
 
 Default(bootimg) # Default build target is the bootimage.
 

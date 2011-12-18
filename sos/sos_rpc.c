@@ -25,6 +25,7 @@ static L4_Word_t stack_address = 0x7750000;
 
 static char read_buffer[BUFFER_SIZE];
 
+
 static int send_in_one_message(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, int count)
 {
    	L4_Msg_t msgx;
@@ -87,6 +88,19 @@ static int get_pid_from_table(L4_ThreadId_t tid_search) {
         }
     }
     return i;
+}
+
+void update_process_table_size(L4_ThreadId_t tid_of_page,unsigned increase) {
+  int index = get_pid_from_table(tid_of_page);
+  if(index >= 0 && index < MAX_PROCESSES) {
+    if(increase) {
+      process_table[index].size += 1;
+    } else {
+      process_table[index].size -= 1;
+    }
+    dprintf(0,"Process table size of pid %lx is %d",process_table[index].tid.raw,process_table[index].size);
+  }
+  
 }
 
 static int get_index_from_token(int token) {

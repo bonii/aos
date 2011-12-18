@@ -43,12 +43,12 @@ typedef struct {
 
 typedef struct {
   L4_ThreadId_t tid;
-  unsigned  size;		/* in pages */
+  unsigned  int size;		/* in pages */
   char	    command[MAX_EXEC_NAME];	/* Name of exectuable */
   int  token_table[MAX_TOKENS];
   unsigned stime;
   L4_ThreadId_t waiting_tid[MAX_WAITING_TID];
 } process_control_block_t;
 
-
+extern void update_process_table_size(L4_ThreadId_t tid,unsigned increase);
 #endif

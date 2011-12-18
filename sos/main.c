@@ -56,7 +56,7 @@ init_thread(void)
     int i;
     L4_Word_t task = 0;
     for (i = 1; (binfo_rec = sos_get_binfo_rec(i)); i++) {
-	if (L4_BootRec_Type(binfo_rec) != L4_BootInfo_SimpleExec && 
+	if (L4_BootRec_Type(binfo_rec) != L4_BootInfo_SimpleExec || 
 	    strcmp(L4_SimpleExec_Cmdline(binfo_rec),"sosh") != 0)
 	    continue;
 	// Must be a SimpleExec boot info record

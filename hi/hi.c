@@ -3,8 +3,13 @@
 
 int main(void) {
   L4_KDB_PrintChar('E');
-  while(1) {
-    ;
+  char *input = (char *) 0x2000000;
+  int size = 8 * 4096;
+  for(int i=0;i<size;i++) {
+    input[i] = 'Y';
   }
+  /*  while(1) {
+    ;
+    }*/
   return 0;
 }

@@ -88,8 +88,6 @@ void
 abort(void)
 {
   pid_t pid_val = my_id();
-  L4_KDB_PrintChar('F');
-  L4_KDB_Enter("Blahhhh");
   process_delete(pid_val);
   while(1);
 }

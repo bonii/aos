@@ -356,7 +356,7 @@ int process_status(process_t *processes, unsigned max)
 	    break;
 	  case SEND_STAT_DATA :
 	    processes[counter].pid = L4_MsgWord(&msg,0);
-	    processes[counter].size = L4_MsgWord(&msg,1);
+	    processes[counter].size = (int) L4_MsgWord(&msg,1);
 	    processes[counter].stime =  L4_MsgWord(&msg,2);
 	    processes[counter].ctime =  L4_MsgWord(&msg,3);;
 	    counter++;

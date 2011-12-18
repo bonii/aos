@@ -28,6 +28,7 @@
 #include "pager.h"
 #include "libsos.h"
 #include "frames.h"
+#include "sos_rpc.h"
 
 static char SWAPFILE[] = "swapfile";
 
@@ -212,6 +213,7 @@ static L4_Word_t mapAddress(L4_ThreadId_t tid, L4_Fpage_t fpage, int swapIndex)
      send = 1;
      L4_Set_Rights(&fpage,L4_Readable);  
      L4_PhysDesc_t phys = L4_PhysDesc(new_low + i * PAGESIZE, L4_DefaultMemory);
+     update_process_table_size(tid,1);
      L4_MapFpage(tid, fpage,phys);
      L4_CacheFlushAll();
     }
@@ -385,6 +387,7 @@ void pager_write_callback(uintptr_t token, int status, fattr_t *attr) {
       page_table[pageIndex].being_updated = page_table[pageIndex].error_in_transfer = 0;
       //Now send the reply message
       printf("Sending message after write callback\n");
+      update_process_table_size(token_val -> source_tid,0);
       L4_Msg_t msg;
       L4_MsgClear(&msg);
       L4_MsgLoad(&msg);
@@ -449,6 +452,7 @@ void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_re
     L4_MsgClear(&msg);
     L4_MsgLoad(&msg);
     L4_Reply(token_val -> destination_tid);
+    update_process_table_size(token_val -> destination_tid,1);
     page_table[pagetableIndex].being_updated = page_table[pagetableIndex].error_in_transfer = 0;
   }
   free(token_val);
