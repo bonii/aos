@@ -33,6 +33,20 @@ prstat(const char *name)
 	   sbuf.st_size, sbuf.st_ctime, sbuf.st_atime, name);
 }
 
+static int kill(int argc, char **argv) {
+  if(argc != 2) {
+    printf("Usage: kill pid\n");
+  }
+  pid_t pid = (pid_t) atoi(argv[1]);
+  int returnval = process_delete(pid);
+  if(!returnval) {
+    printf("Killed process %d\n",pid);
+  } else {
+    printf("Invalid process %d\n",pid);
+  }
+  return 0;
+}
+
 static int thrash(int argc, char **argv) {
   size_t buf_size = 2 * 1024;
   char *buf = (char *) 0x2000000;
@@ -61,6 +75,12 @@ static int thrash(int argc, char **argv) {
     }
   }
   printf("Result of write to swap is correct\n");
+  return 0;
+}
+
+static int myid(int argc, char **argv) {
+  pid_t pid = my_id();
+  printf("Pid value is %d", pid);
   return 0;
 }
 
@@ -276,6 +296,8 @@ struct command commands[] = {
     {"exec", exec},
     {"time", time},
     {"sleep", sleep_func},
+    {"myid",myid},
+    {"kill",kill},
     {"thrash", thrash}
 };
     

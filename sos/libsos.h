@@ -141,6 +141,7 @@ static inline L4_Word_t sos_tid2task(L4_ThreadId_t tid)
 //
 extern void sos_usleep(uint32_t microseconds);
 
+extern int sos_delete_task(L4_ThreadId_t tid, L4_ThreadId_t pager);
 // XXX Hack: should look this up in kip
 // #define PAGESIZE (L4_PageSizeMask(kip) + 1)
 #define PAGESIZE 4096

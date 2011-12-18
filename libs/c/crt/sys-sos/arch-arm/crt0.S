@@ -93,7 +93,7 @@ BEGIN_PROC(_start)
 // execute malloc_init
     bl      __malloc_init
     bl      main
-	bl	exit
+    bl	    exit
 //2:	.word	_stack_top
 END_PROC(_start)
 //        .bss

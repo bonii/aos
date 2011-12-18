@@ -14,8 +14,8 @@
 #define MAX_EXEC_NAME 32
 #define MAX_EXECUTABLES_IN_IMAGE 20
 
-extern void rpc_thread(void);
-extern void set_address_binfo(L4_BootRec_t *list[], L4_Word_t user_stack_address, int number_of_exec);
+void rpc_thread(void);
+
 
 typedef struct {
     L4_ThreadId_t tid;
@@ -46,6 +46,7 @@ typedef struct {
   unsigned  size;		/* in pages */
   char	    command[MAX_EXEC_NAME];	/* Name of exectuable */
   int  token_table[MAX_TOKENS];
+  unsigned stime;
   L4_ThreadId_t waiting_tid[MAX_WAITING_TID];
 } process_control_block_t;
 

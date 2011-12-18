@@ -1,7 +1,7 @@
 Import("*")
 
-sources=Split("helloapp.c")
-obj = env.MyProgram("hi", sources, LIBS=["c","sos"])
+sources=Split("hi.c")
+obj = env.MyProgram("hi", sources, LIBS=["c","l4","sos"])
 
 Return("obj")
 

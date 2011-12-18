@@ -348,6 +348,11 @@ sos_task_new(L4_Word_t task, L4_ThreadId_t pager,
     return tid;
 }
 
+int sos_delete_task(L4_ThreadId_t tid, L4_ThreadId_t pager) {
+    return L4_ThreadControl(tid, L4_nilthread, root_thread_g, pager,
+			    L4_anythread, L4_anythread, (void *) utcb_base_s);
+}
+
 L4_BootRec_t *
 sos_get_binfo_rec(int index)
 {

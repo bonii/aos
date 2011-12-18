@@ -12,6 +12,7 @@ fildes_t stdout_fd = 0;
 
 static L4_ThreadId_t rpc_threadId;
 static L4_ThreadId_t root_threadId;
+
 static void sos_init(void)
 {
     L4_Msg_t msg;
@@ -26,6 +27,7 @@ static void sos_init(void)
     rpc_threadId.raw = L4_MsgWord(&msg, 0);
 
 }
+
 
 static int send_in_one_message(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, int count)
 {
@@ -261,58 +263,118 @@ int stat(const char *path, stat_t *buf)
 
 pid_t process_create(const char *path)
 {
+    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     L4_Msg_t msg;
     L4_MsgTag_t tag;
+    pid_t process_id = -1;
     int result = send_in_one_message(rpc_threadId, SOS_RPC_PROCESS_CREATE, path, strlen(path));
-    pid_t pid_process = -1;
     if(result != -1) {
-        L4_Accept(L4_UntypedWordsAcceptor);
         //The message was successfully sent, receive the process id from the rpc thread
         tag = L4_Receive(rpc_threadId);
-	L4_MsgStore(tag,&msg);
-	pid_process = (pid_t) L4_MsgWord(&msg,0);
+        L4_MsgStore(tag,&msg);
+        process_id = (pid_t)L4_MsgWord(&msg,0);
     }
-    return pid_process;
+    return process_id;
 }
 
 int process_delete(pid_t pid)
 {
+    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     L4_Msg_t msg;
     L4_MsgTag_t tag;
+    int returnval = -1;
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_PROCESS_DELETE));
-    L4_MsgAppendWord(&msg,pid);
+    L4_MsgAppendWord(&msg,(L4_Word_t) pid);
     L4_MsgLoad(&msg);
     tag = L4_Call(rpc_threadId);
-    L4_MsgStore(tag,&msg);
-    int returnval = L4_MsgWord(&msg,0);
+    if(!L4_IpcFailed(tag)) {
+      L4_MsgStore(tag,&msg);
+      returnval = (int) L4_MsgWord(&msg,0);
+    }
     return returnval;
 }
 
 pid_t my_id(void)
 {
+    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
     L4_Msg_t msg;
+    L4_MsgTag_t tag;
+    int returnval = -1;
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_PROCESS_ID));
     L4_MsgLoad(&msg);
-    L4_MsgTag_t tag;
     tag = L4_Call(rpc_threadId);
-    if(L4_IpcFailed(tag)) {
-      return -1;
-    }
-    L4_MsgStore(tag, &msg);
-    pid_t pid_process = (pid_t) L4_MsgWord(&msg,0);
-    return pid_process;
+    L4_MsgStore(tag,&msg);
+    returnval = (pid_t) L4_MsgWord(&msg,0);
+    return returnval;
 }
 
 int process_status(process_t *processes, unsigned max)
 {
-    return 0;
+    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+       sos_init();
+    }
+    L4_Msg_t msg;
+    L4_MsgTag_t tag;
+    L4_MsgClear(&msg);
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_PROCESS_STAT));
+    L4_MsgAppendWord(&msg,(L4_Word_t) max);
+    L4_MsgLoad(&msg);
+    L4_Send(rpc_threadId);
+    int counter = 0, breakloop = 0;
+    char command_val[N_NAME];
+    while(1) {
+        if (breakloop) 
+	    break;
+	tag = L4_Receive(rpc_threadId);
+	L4_MsgStore(tag,&msg);
+        switch (TAG_SYSLAB(tag)) {
+	  case SEND_STAT_COMMAND :
+	    L4_MsgGet(&msg,(L4_Word_t *) command_val);
+	    strcpy(processes[counter].command,command_val);
+	    processes[counter].command[strlen(command_val)];
+	    L4_Reply(rpc_threadId);
+	    break;
+	  case SEND_STAT_DATA :
+	    processes[counter].pid = L4_MsgWord(&msg,0);
+	    processes[counter].size = L4_MsgWord(&msg,1);
+	    processes[counter].stime =  L4_MsgWord(&msg,2);
+	    processes[counter].ctime =  L4_MsgWord(&msg,3);;
+	    counter++;
+	    L4_Reply(rpc_threadId);
+	    break;
+	  case SEND_STAT_END :
+	    breakloop = 1;
+	}
+    }
+  return counter;
 }
 
 pid_t process_wait(pid_t pid)
 {
-    return 0;
+    if(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
+        sos_init();
+    }
+    L4_Msg_t msg;
+    L4_MsgTag_t tag;
+    int returnval = -1;
+    L4_MsgClear(&msg);
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_PROCESS_WAIT));
+    L4_MsgAppendWord(&msg,(L4_Word_t) pid);
+    L4_MsgLoad(&msg);
+    tag = L4_Call(rpc_threadId);
+    if(!L4_IpcFailed(tag)) {
+      L4_MsgStore(tag,&msg);
+      returnval = (pid_t) L4_MsgWord(&msg,0);
+    }
+    return returnval;
 }
 
 long time_stamp(void)

@@ -8,7 +8,7 @@
 
 #
 # XXX: Student change this for the milestone you are building
-milestone = 5
+milestone = 7
 
 # First step is to include our real build tools tools/build.py includes the
 # KengeEnvironment
@@ -45,7 +45,7 @@ rootserver_env.AddLibrary("lwip")
 rootserver_env.AddLibrary("nfs")
 rootserver_env.AddLibrary("clock")
 rootserver_env.AddLibrary("serial")
-sos = rootserver_env.Application("sos");
+sos = rootserver_env.Application("sos")
 
 timer_syscall_milestone = 3
 
@@ -56,22 +56,17 @@ app_env.AddLibrary("l4")
 app_env.AddLibrary("c", system="sos")
 app_env.AddLibrary("clock")
 app_env.AddLibrary("elf")
-
-if milestone < timer_syscall_milestone:
-    app_name = "tty_test"
-else:
-    app_name = "sosh"
-    app_env.AddLibrary("sos")
+app_env.AddLibrary("sos")
 
 # Once you get to the later milestones you will be writing lots of little test
 # tools that need to get loaded and run in your context.  Do that by calling
 # the Application function a number times in the app_env environment.
-app = app_env.Application(app_name)
-app1 = app_env.Application("hi")
+sosh = app_env.Application("sosh")
+hi = app_env.Application("hi")
 
 # Bootimage takes a comma seperated list of Applications that are linked
 # together into a single bootimg.bin binary.
-bootimg = env.Bootimage(l4kernel, sos, app,app1)
+bootimg = env.Bootimage(l4kernel, sos,sosh,hi)
 
 Default(bootimg) # Default build target is the bootimage.
 

@@ -27,9 +27,13 @@
 #define SOS_SYSCALL_SLEEP                    ((L4_Word_t) 16)
 #define SOS_RPC_PROCESS_CREATE               ((L4_Word_t) 17)
 #define SOS_RPC_PROCESS_WAIT                 ((L4_Word_t) 18)
-#define SOS_RPC_PROCESS_DELETE                 ((L4_Word_t) 19)
+#define SOS_RPC_PROCESS_DELETE               ((L4_Word_t) 19)
 #define SOS_RPC_PROCESS_STAT                 ((L4_Word_t) 20)
 #define SOS_RPC_PROCESS_ID                   ((L4_Word_t) 21)
+
+#define SEND_STAT_COMMAND                     ((L4_Word_t) 22)
+#define SEND_STAT_DATA                        ((L4_Word_t) 23)
+#define SEND_STAT_END                         ((L4_Word_t) 24)
 
 #define GETDIRENT_VALID_FILE                 ((L4_Word_t) 1)
 #define GETDIRENT_FIRST_EMPTY_FILE           ((L4_Word_t) 2)

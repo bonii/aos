@@ -7,6 +7,7 @@
 
 #include <serial.h>
 #include "sos_rpc_callbacks.h"
+#include <clock.h>
 
 struct serial * serial_port = 0;
 
@@ -18,15 +19,37 @@ static L4_ThreadId_t tid;
 static read_listener_t console_listeners[MAX_CONSOLE_READERS];
 static process_control_block_t process_table[MAX_PROCESSES];
 static int BUFFER_LOCK;
-L4_BootRec_t *executable_list[MAX_EXECUTABLES_IN_IMAGE];
-int number_of_executables;
-L4_Word_t stack_address;
+static L4_ThreadId_t any_process_list[MAX_PROCESSES];
 
-static int task_number = 1;
-
+static L4_Word_t stack_address = 0x7750000;
 
 static char read_buffer[BUFFER_SIZE];
 
+static int send_in_one_message(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, int count)
+{
+   	L4_Msg_t msgx;
+	L4_MsgClear(&msgx);
+	L4_Set_MsgLabel(&msgx, MAKETAG_SYSLAB(MsgLabel));
+	for (int i = 0; i < count;) // i incremented in the loop 
+	{
+		L4_Word_t word = 0;
+		// add bytes one by one
+	    char* writeTo = (char*) &word;
+	    for (int k = 0; k < sizeof(L4_Word_t) && i < count; k++)
+	    {
+			*(writeTo++) = data[i++];
+		}
+		L4_MsgAppendWord(&msgx, word);
+
+	}
+	L4_MsgLoad(&msgx);
+	L4_MsgTag_t tagx = L4_Send(receiver);
+	if (L4_IpcFailed(tagx))
+	{
+	    return -1;
+	}
+	return 0;
+}
 
 static int get_empty_token(void)
 {
@@ -54,6 +77,18 @@ static int get_empty_pid(void)
     return i;
 }
 
+static int get_pid_from_table(L4_ThreadId_t tid_search) {
+    int i;
+    for (i = 0; i < MAX_PROCESSES; i++)
+    {
+      if (L4_ThreadNo(process_table[i].tid) == L4_ThreadNo(tid_search))
+        {
+            break;
+        }
+    }
+    return i;
+}
+
 static int get_index_from_token(int token) {
   return (int) (token/(MAX_ACCESSES));
 }
@@ -70,7 +105,7 @@ Token_Access_t* get_access_from_token(int token) {
 }
 
 static void get_serial_port_input(struct serial * serial_port,char input) {
-    dprintf(0, "got input token %c\n", input);
+    dprintf(2, "got input token %c\n", input);
     char temp[2];
     int i = 0;
     temp[0] = input;
@@ -96,7 +131,7 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
     //Take the lock
     int buffer_index_flushed = -1;
     for(i=0;i<strlen(read_buffer);i++) {
-      dprintf(0,"%c .. buffer",read_buffer[i]);
+      dprintf(2,"%c .. buffer",read_buffer[i]);
       for(int j=0;j<MAX_CONSOLE_READERS;j++) {
 	if(L4_ThreadNo(console_listeners[j].tid) != L4_ThreadNo(L4_nilthread)
 	   && console_listeners[j].number_bytes_left > 0 
@@ -110,10 +145,10 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
 		writeTo[0] = read_buffer[i];
 		L4_MsgAppendWord(&msg1, word);
 		L4_MsgLoad(&msg1);
-		dprintf(0,"Sending message to %lx %c\n",L4_ThreadNo(console_listeners[j].tid)
+		dprintf(2,"Sending message to %lx %c\n",L4_ThreadNo(console_listeners[j].tid)
 			,read_buffer[i]);
 		L4_Send(console_listeners[j].tid);
-		dprintf(0,"After message sent \n:");
+		dprintf(2,"After message sent \n:");
 		console_listeners[j].number_bytes_left--;
 		if(read_buffer[i] == '\n' || console_listeners[j].number_bytes_left == 0) {
 		  console_listeners[j].tid = L4_nilthread;
@@ -130,7 +165,7 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
       
     }
     read_buffer[counter]=0;
-    dprintf(0,"read buffer is %s\n",read_buffer);
+    dprintf(2,"read buffer is %s\n",read_buffer);
     //Release lock
     BUFFER_LOCK = 0;
 }
@@ -403,6 +438,7 @@ static int close_file_descriptor(int token) {
     int access_index = get_access_index_from_token(token);
     Token_Access_t* access = get_access_from_token(token);
     //If it is a console reader deregister it
+    dprintf(0,"IReplying to tid %lx",L4_ThreadNo(tid));
     while(BUFFER_LOCK) {
       ;
     }
@@ -416,6 +452,7 @@ static int close_file_descriptor(int token) {
         }
       }
     }
+    dprintf(0,"IReplying to tid %lx",L4_ThreadNo(tid));
     BUFFER_LOCK = 0;
     if(access_index < MAX_ACCESSES && access->tid.raw == tid.raw) {
         found = 0;
@@ -430,6 +467,7 @@ static int close_file_descriptor(int token) {
             token_table[index].accesses[j] = token_table[index].accesses[j+1];
         }
     }
+    dprintf(0,"Replying to tid %lx",L4_ThreadNo(tid));
     return found;
 }
 
@@ -543,7 +581,6 @@ static int sos_rpc_stat(void)
     // get the filename
     char filename[FILE_NAME_SIZE];
     L4_MsgGet(&msg, (L4_Word_t*)filename);
-
     nfs_lookup(&mnt_point, filename, nfs_lookup_callback, (uintptr_t) tid.raw);
     return 0;
 }
@@ -598,13 +635,17 @@ static int sos_rpc_getdirent(void)
 
 static int sos_rpc_process_delete(void) {
     int pid_kill = (int) L4_MsgWord(&msg,0);
+    dprintf(0,"Got a process delete %d %lx",pid_kill,L4_ThreadNo(tid));
     int returnval = 0;
     L4_Msg_t msg1;
     L4_MsgTag_t tag1;
-
+    L4_ThreadId_t tid_kill = L4_nilthread;
     if(pid_kill >=0 && pid_kill < MAX_PROCESSES 
        && L4_ThreadNo(process_table[pid_kill].tid) != L4_ThreadNo(L4_nilthread)) {
       //Send message all the 
+      tid_kill = process_table[pid_kill].tid;
+      int killval = sos_delete_task(tid_kill,L4_Pager());
+      dprintf(0,"Returnval of process kill is %d\n",killval);
       for(int i=0;i<MAX_TOKENS;i++) {
 	if(process_table[pid_kill].token_table[i] != -1) {
 	  int returnval = close_file_descriptor(process_table[pid_kill].token_table[i]);
@@ -629,29 +670,45 @@ static int sos_rpc_process_delete(void) {
 	      }
 	}
       }
+      //We do not signal returnval failure here
+      for(int i=0;i<MAX_PROCESSES && returnval != -1;i++) {
+        if(L4_ThreadNo(any_process_list[i]) != L4_ThreadNo(L4_nilthread)) {
+       	      L4_MsgClear(&msg1);
+	      L4_Set_MsgMsgTag(&msg1, L4_Niltag);
+	      L4_MsgAppendWord(&msg1, pid_kill);
+	      L4_MsgLoad(&msg);
+	      tag1 = L4_Reply(any_process_list[i]);
+	      if(!L4_IpcFailed(tag)) {
+                any_process_list[i] = L4_nilthread;
+	      }
+        }
+      }
       if(returnval == 0) {
 	//Sucessful close
 	process_table[pid_kill].tid = L4_nilthread;
 	process_table[pid_kill].size = 0;
+	process_table[pid_kill].stime = 0;
 	strcpy(process_table[pid_kill].command,"");
       }
     } else {
       returnval = -1; 
     }
+    //If the process to be killed invoked process_delete on itself we will not reply back
+    if(L4_ThreadNo(tid_kill) == L4_ThreadNo(tid)) {
+      dprintf(0,"Not replying back to tid %lx",L4_ThreadNo(tid));
+      return 0;
+    }
     L4_MsgClear(&msg);
     L4_Set_MsgMsgTag(&msg, L4_Niltag);
     L4_MsgAppendWord(&msg, returnval);
     L4_MsgLoad(&msg);
+    dprintf(0,"Replying to tid %lx",L4_ThreadNo(tid));
     return 1;
 }
 
 static int sos_rpc_process_id(void) {
-    int i = 0;
-    for(i=0;i<MAX_PROCESSES;i++) {
-      if(L4_ThreadNo(process_table[i].tid) == L4_ThreadNo(tid)) {
-	    break;
-	}
-    }
+    dprintf(0,"Got token process_id from tid %lx\n",tid);
+    int i = get_pid_from_table(tid);
     if(i >= MAX_PROCESSES) {
         //It was not found in the process table
         i = -1;
@@ -663,37 +720,104 @@ static int sos_rpc_process_id(void) {
     return 1;
 }
 
+static int sos_rpc_process_wait(void) {
+  int pid = (int) L4_MsgWord(&msg,0);
+  dprintf(0,"Got token process_wait for pid %d",pid);
+  int errorFlag = 1;
+  int returnval = -1;
+  if(pid == -1) {
+    //Need to add it in the any list
+    for(int i=0;i<MAX_PROCESSES;i++) {
+      if(L4_ThreadNo(any_process_list[i]) == L4_ThreadNo(L4_nilthread)) {
+        any_process_list[i] = tid;
+        errorFlag = 0;
+      }
+    }
+  } else {
+    if(pid >= 0 && pid < MAX_PROCESSES && L4_ThreadNo(process_table[pid].tid) != L4_ThreadNo(L4_nilthread)) {
+      for(int i=0;i<MAX_WAITING_TID;i++) {
+        if(L4_ThreadNo(process_table[pid].waiting_tid[i]) == L4_ThreadNo(L4_nilthread)) {
+          process_table[pid].waiting_tid[i] = tid;
+          errorFlag = 0;
+        }
+      }
+    }
+  }
+  if(errorFlag) {
+    L4_MsgClear(&msg);
+    L4_Set_MsgMsgTag(&msg, L4_Niltag);
+    L4_MsgAppendWord(&msg, returnval);
+    L4_MsgLoad(&msg);
+    return 1;
+  }
+  dprintf(0,"Not returning a reply");
+  return 0;
+}
+
+
+static int sos_rpc_process_stat(void) {
+    int max_processes = L4_MsgWord(&msg,0);
+    int returnval = 0;
+    for(int i=0,count=1;i<MAX_PROCESSES && count <= max_processes;i++) {
+      if(L4_ThreadNo(process_table[i].tid) != L4_ThreadNo(L4_nilthread)) {
+	//We need to send the message
+	count++;
+	returnval = send_in_one_message(tid,SEND_STAT_COMMAND,process_table[i].command,strlen(process_table[i].command));
+	L4_Receive(tid);
+	L4_MsgClear(&msg);
+	L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SEND_STAT_DATA));
+	//Pid value
+	L4_MsgAppendWord(&msg, i);
+	L4_MsgAppendWord(&msg, process_table[i].size);
+	L4_MsgAppendWord(&msg, process_table[i].stime/1000);
+	L4_MsgAppendWord(&msg, (time_stamp() - process_table[i].stime)/1000);
+	L4_MsgLoad(&msg);
+	L4_Call(tid);
+      }
+    }
+    //Now we need to send an end message
+    L4_MsgClear(&msg);
+    L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SEND_STAT_END));
+    L4_MsgLoad(&msg);
+    return 1;
+}
+
 static int sos_rpc_process_create(void) {
-    char execname[FILE_NAME_MODE_SIZE];
+    char execname[FILE_NAME_SIZE];
     L4_MsgGet(&msg, (L4_Word_t *)execname);
-    execname[FILE_NAME_SIZE]=0;
-    dprintf(0,"Got process create %s",execname);
+    //0 terminate it
+    execname[FILE_NAME_SIZE-1]=0;
+    dprintf(0,"Got process create %s\n",execname);
     int errorFlag = 1;
     int pid = -1;
     int index = -1;
-    for(int i=0;i<number_of_executables;i++) {
-      dprintf(0,"%s %s\n",execname,L4_SimpleExec_Cmdline(executable_list[i]));
-      if(strcmp(execname,L4_SimpleExec_Cmdline(executable_list[i])) == 0) {
-        index = get_empty_pid();
-        if(index >= MAX_PROCESSES) {
-          break;
-        }
+    L4_BootRec_t *binfo_rec;
+    index = get_empty_pid();
+    for(int i=1;(binfo_rec = sos_get_binfo_rec(i)) && index < MAX_PROCESSES;i++) {
+      dprintf(0,"%s %s\n",execname,L4_SimpleExec_Cmdline(binfo_rec));
+      if(L4_BootRec_Type(binfo_rec) == L4_BootInfo_SimpleExec
+         && strcmp(execname,L4_SimpleExec_Cmdline(binfo_rec)) == 0) {
         process_table[index].size = 0;
+	process_table[index].stime = time_stamp();
         for(int j=0;j<MAX_TOKENS;j++) {
-          process_table[i].token_table[j] = -1;
+          process_table[index].token_table[j] = -1;
         }
-       	L4_ThreadId_t newtid = sos_task_new(++task_number, L4_Pager(), 
-		(void *) L4_SimpleExec_TextVstart(executable_list[i]),
+       	L4_ThreadId_t newtid = sos_task_new((index+5), L4_Pager(), 
+		(void *) L4_SimpleExec_TextVstart(binfo_rec),
 		(void *) stack_address);
+
+        dprintf(0,"Started new process with tid  %lx index %d",newtid.raw,index);
+        //L4_KDB_Enter("Blahhhh");
         process_table[index].tid = newtid;
-        strcpy(process_table[index].command,execname);
-        for(int k=0;k<MAX_WAITING_TID;k++) {
+        strcpy(process_table[index].command,execname); 
+        /*for(int k=0;k<MAX_WAITING_TID;k++) {
           if(L4_ThreadNo(process_table[index].waiting_tid[k]) == L4_ThreadNo(L4_nilthread)) {
             process_table[index].waiting_tid[k] = tid;
             break;
           }
-        }
+          }*/
         errorFlag = 0;
+        break;
       }
     }
     
@@ -740,6 +864,7 @@ void rpc_thread(void)
     for(int i=0;i<MAX_PROCESSES;i++) {
       process_table[i].tid = L4_nilthread;
       process_table[i].size = 0;
+      any_process_list[i] = L4_nilthread;
       strcpy(process_table[i].command,"");
     }
     
@@ -804,6 +929,12 @@ void rpc_thread(void)
         case SOS_RPC_PROCESS_DELETE:
 	    send = sos_rpc_process_delete();
 	    break;
+        case SOS_RPC_PROCESS_WAIT:
+            send = sos_rpc_process_wait();
+            break;
+        case SOS_RPC_PROCESS_STAT:
+	    send = sos_rpc_process_stat();
+	    break;
        default:
             // Unknown system call, so we don't want to reply to this thread
             sos_print_l4memory(&msg, L4_UntypedWords(tag) * sizeof(uint32_t));
@@ -814,8 +945,3 @@ void rpc_thread(void)
     }
 }
 
-void set_address_binfo(L4_BootRec_t *list[], L4_Word_t user_stack_address, int number_of_exec) {
-  memcpy(executable_list,list,number_of_exec*sizeof(L4_BootRec_t*));
-  number_of_executables = number_of_exec;
-  stack_address = user_stack_address;
-}
