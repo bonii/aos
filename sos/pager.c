@@ -461,6 +461,7 @@ void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_re
 void unmap_process(L4_ThreadId_t tid_killed) {
   for(int i=0;i<numPTE;i++) {
     if(L4_ThreadNo(page_table[i].tid) == L4_ThreadNo(tid_killed)) {
+      
         page_table[i].tid = L4_nilthread;
 	page_table[i].referenced = 0;
 	page_table[i].dirty = 0;
@@ -472,11 +473,13 @@ void unmap_process(L4_ThreadId_t tid_killed) {
   
   for(int i=0;i<MAX_SWAP_ENTRIES;i++) {
     if(L4_ThreadNo(swap_table[i].tid) == L4_ThreadNo(tid_killed)) {
+      
         swap_table[i].tid = L4_nilthread;
 	swap_table[i].next_free = head_free_swap;
 	head_free_swap = i;
     }
   }
+  L4_CacheFlushAll();
 }
 
 int

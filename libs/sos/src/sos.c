@@ -343,7 +343,7 @@ int process_status(process_t *processes, unsigned max)
     int counter = 0, breakloop = 0;
     char command_val[N_NAME];
     while(1) {
-        if (breakloop) 
+        if (breakloop || counter == max) 
 	    break;
 	tag = L4_Receive(rpc_threadId);
 	L4_MsgStore(tag,&msg);

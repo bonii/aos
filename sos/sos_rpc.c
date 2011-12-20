@@ -763,6 +763,7 @@ static int sos_rpc_process_wait(void) {
       if(L4_ThreadNo(any_process_list[i]) == L4_ThreadNo(L4_nilthread)) {
         any_process_list[i] = tid;
         errorFlag = 0;
+        break;
       }
     }
   } else {
@@ -771,6 +772,7 @@ static int sos_rpc_process_wait(void) {
         if(L4_ThreadNo(process_table[pid].waiting_tid[i]) == L4_ThreadNo(L4_nilthread)) {
           process_table[pid].waiting_tid[i] = tid;
           errorFlag = 0;
+          break;
         }
       }
     }
