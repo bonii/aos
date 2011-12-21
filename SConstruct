@@ -51,25 +51,39 @@ timer_syscall_milestone = 3
 
 # Use the app_env environment for building everything else that will run in the
 # userland context.  Can't add libs/sos 'cause it doesn't exist yet.
-app_env=env.Copy("userland", LINKFLAGS=["-r"])
+app_env=env.Copy("userland", LINKFLAGS=["-Ttext=0x1000"])
 app_env.AddLibrary("l4")
 app_env.AddLibrary("c", system="sos")
 app_env.AddLibrary("clock")
 app_env.AddLibrary("elf")
 app_env.AddLibrary("sos")
+app_env1=env.Copy("userland-bootimage", LINKFLAGS=["-r"])
+app_env1.AddLibrary("l4")
+app_env1.AddLibrary("c", system="sos")
+app_env1.AddLibrary("clock")
+app_env1.AddLibrary("elf")
+app_env1.AddLibrary("sos")
 
 # Once you get to the later milestones you will be writing lots of little test
 # tools that need to get loaded and run in your context.  Do that by calling
 # the Application function a number times in the app_env environment.
-sosh = app_env.Application("sosh")
-hi = app_env.Application("hi")
-test1 = app_env.Application("test1")
-test2 = app_env.Application("test2")
+sosh = app_env1.Application("sosh")
+#hi = app_env.Application("hi")
+#test1 = app_env.Application("test1")
+#test2 = app_env.Application("test2")
 
 # Bootimage takes a comma seperated list of Applications that are linked
 # together into a single bootimg.bin binary.
-bootimg = env.Bootimage(l4kernel, sos,sosh,hi, test1, test2)
+bootimg = env.Bootimage(l4kernel, sos,sosh)
+
+filesystem_apps=[]
+#filesystem_apps.append(app_env.Application("sosh"))
+filesystem_apps.append(app_env.Application("hi"))
+filesystem_apps.append(app_env.Application("test1"))
+filesystem_apps.append(app_env.Application("test2"))
+
 
 Default(bootimg) # Default build target is the bootimage.
-
+Default(filesystem_apps)
+Default(app_env.Install ("/mnt/hgfs/nfs",filesystem_apps))
 # vim:ft=python:
