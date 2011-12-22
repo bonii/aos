@@ -13,6 +13,8 @@
 #define MAX_PROCESSES 1024
 #define MAX_EXEC_NAME 32
 #define MAX_EXECUTABLES_IN_IMAGE 20
+#define NFS_WRITE_SIZE 256
+#define NFS_READ_SIZE 256
 
 void rpc_thread(void);
 
@@ -50,5 +52,16 @@ typedef struct {
   L4_ThreadId_t waiting_tid[MAX_WAITING_TID];
 } process_control_block_t;
 
+struct token_process_t {
+  char *elf_file;
+  unsigned int data_read;
+  unsigned int file_size;
+  L4_ThreadId_t creating_process_tid;
+  unsigned int process_table_index;
+  struct cookie* fh;
+} ;
+
+
 extern void update_process_table_size(L4_ThreadId_t tid,unsigned increase);
+extern void process_table_add_creation_entry(int index,L4_ThreadId_t newtid,unsigned success);
 #endif

@@ -15,8 +15,6 @@ extern void unmap_process(L4_ThreadId_t tid_killed);
 #define UNDEFINED_MEMORY -1
 #define VIRTUAL(addr) (addr >= 0x2000000)
 #define MAX_SWAP_ENTRIES 1000
-#define NFS_WRITE_SIZE 256
-#define NFS_READ_SIZE 256
 #define MAXI 10000
 
 typedef struct {

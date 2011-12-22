@@ -82,8 +82,12 @@ filesystem_apps.append(app_env.Application("hi"))
 filesystem_apps.append(app_env.Application("test1"))
 filesystem_apps.append(app_env.Application("test2"))
 
+appnames = ["hi","test1","test2"]
+for x in appnames:
+    shutil.copyfile("./build/userland/%s/%s" % (x,x),"%s/%s" %
+("/mnt/hgfs/nfs",x));
 
-Default(bootimg) # Default build target is the bootimage.
+Default(bootimg)
 Default(filesystem_apps)
-Default(app_env.Install ("/mnt/hgfs/nfs",filesystem_apps))
+#Default(app_env.Install ("/mnt/hgfs/nfs",filesystem_apps))
 # vim:ft=python:

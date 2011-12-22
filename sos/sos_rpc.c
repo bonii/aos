@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 #include <assert.h>
-
+#include <stdlib.h>
 #include "libsos.h"
 
 #include <serial.h>
@@ -21,7 +21,7 @@ static process_control_block_t process_table[MAX_PROCESSES];
 static int BUFFER_LOCK;
 static L4_ThreadId_t any_process_list[MAX_PROCESSES];
 
-static L4_Word_t stack_address = 0x7750000;
+
 
 static char read_buffer[BUFFER_SIZE];
 
@@ -199,11 +199,6 @@ static int get_file_handle(char* filename, struct cookie* writeTo, int* size)
         ((L4_Word_t*)writeTo)[i] = L4_MsgWord(&new_msg, i+1);
     }
 
-    /*dprintf(0, "cookie in get_file_handle: ");
-    for (int i = 0 ; i < FHSIZE; i++)
-    {
-        dprintf(0, "%c", writeTo->data[i]);
-    }*/
     dprintf(0, "\n");
     return status;
 }
@@ -345,15 +340,6 @@ static int sos_rpc_get_token(void)
         int status = get_file_handle(filename, &fh, &size);
         if (status != 0)
         {
-            /*        typedef struct sattr 
-            {
-                unsigned int mode;
-                unsigned int uid;
-                unsigned int gid;
-                unsigned int size;
-                timeval_t    atime;
-                timeval_t    mtime;
-            } sattr_t;*/
             sattr_t attributes;
             attributes.mode = mode;
             attributes.size = 0;
@@ -391,9 +377,6 @@ static char has_access(L4_ThreadId_t tid, int token, fmode_t mode)
 
 static int sos_rpc_write(void)
 {
-    //dprintf(0, "got sos_rpc_write call\n");
-    // Extract actual message
-    //int num_words = tag.X.u - 1;
     L4_Word_t realdata[WORDS_SENT_PER_IPC];
     L4_MsgGet(&msg, realdata);
     // first word is the file descriptor token
@@ -434,15 +417,6 @@ static int sos_rpc_write(void)
             get_file_handle(token_table[token_index].filename, &fh, &size);
             nfs_write(&fh, access->write_offset, bytes_without_length_info,(char *)(&realdata[1]), nfs_write_callback, (uintptr_t) token);
             dprintf(2,"After nfs write");
-            /*L4_Msg_t new_msg;
-            L4_MsgTag_t new_tag = L4_Receive(L4_Pager());
-            int status = L4_Label(new_tag);
-            dprintf(0, "rpc thread woken up from nfs_write_callback, status is %d\n", status);
-            L4_MsgStore(new_tag, &new_msg);
-            int size = L4_MsgWord(&new_msg,0);
-            bytes_sent = size - access->write_offset;
-            access->write_offset = size;*/
-            //token_table[token_index].write_file_offset += bytes_sent;
             send = 0;
         }
     }
@@ -635,8 +609,6 @@ static int sos_rpc_getdirent(void)
     if (pos < filename_iterator)
     {
         char* toSend = files[pos].chars;
-        //char* toSend = "hellothisisalongnametestfile";
-        //dprintf(0, "position %d is a valid file: '%s'\n", pos, toSend);
         L4_Set_MsgLabel(&msg, GETDIRENT_VALID_FILE);
         int count = strlen(toSend) + 1;
         for (int i = 0; i < count;) // i incremented in the loop 
@@ -822,50 +794,53 @@ static int sos_rpc_process_stat(void) {
     return 1;
 }
 
+void process_table_add_creation_entry(int index,L4_ThreadId_t newtid,unsigned success) {
+  if(success) {
+    process_table[index].tid = newtid;
+    process_table[index].stime = time_stamp();
+  } else {
+    //Unsuccessful process create, free it up
+    process_table[index].tid = L4_nilthread;
+    strcpy(process_table[index].command,"");
+  }
+}
+
 static int sos_rpc_process_create(void) {
     char execname[FILE_NAME_SIZE];
     L4_MsgGet(&msg, (L4_Word_t *)execname);
     //0 terminate it
     execname[FILE_NAME_SIZE-1]=0;
     dprintf(0,"Got process create %s\n",execname);
-    int errorFlag = 1;
     int pid = -1;
     int index = -1;
-    L4_BootRec_t *binfo_rec;
     index = get_empty_pid();
-    for(int i=1;(binfo_rec = sos_get_binfo_rec(i)) && index < MAX_PROCESSES;i++) {
-      dprintf(0,"%s %s\n",execname,L4_SimpleExec_Cmdline(binfo_rec));
-      if(L4_BootRec_Type(binfo_rec) == L4_BootInfo_SimpleExec
-         && strcmp(execname,L4_SimpleExec_Cmdline(binfo_rec)) == 0) {
-        process_table[index].size = 0;
-	process_table[index].stime = time_stamp();
-        for(int j=0;j<MAX_TOKENS;j++) {
-          process_table[index].token_table[j] = -1;
-        }
-       	L4_ThreadId_t newtid = sos_task_new((index+5), L4_Pager(), 
-		(void *) L4_SimpleExec_TextVstart(binfo_rec),
-		(void *) stack_address);
-
-        dprintf(0,"Started new process with tid  %lx index %d",newtid.raw,index);
-        //L4_KDB_Enter("Blahhhh");
-        process_table[index].tid = newtid;
-        strcpy(process_table[index].command,execname); 
-        for(int k=0;k<MAX_WAITING_TID;k++) {
-            process_table[index].waiting_tid[k] = L4_nilthread;
-        }
-        errorFlag = 0;
-        break;
-      }
+    //We want to load something from the file system here
+    if(index >= MAX_PROCESSES) {
+          L4_MsgClear(&msg);
+	  L4_MsgAppendWord(&msg, pid);
+	  L4_MsgLoad(&msg);
+	  return 1;
     }
-    
-    if(!errorFlag) {
-      pid = index;
+    //This will prevent this process table entry from being manipulated until the read callbacks are finished
+    process_table[index].tid = L4_Myself();
+    process_table[index].size = 0;
+    for(int j=0;j<MAX_TOKENS;j++) {
+      process_table[index].token_table[j] = -1;
     }
-    L4_MsgClear(&msg);
-    L4_MsgAppendWord(&msg, pid);
-    L4_MsgLoad(&msg);
-    return 1;
+    strcpy(process_table[index].command,execname); 
+    for(int k=0;k<MAX_WAITING_TID;k++) {
+      process_table[index].waiting_tid[k] = L4_nilthread;
+    }
+    struct token_process_t *token_process ;
+    token_process = (struct token_process_t *) malloc(sizeof(struct token_process_t));
+    token_process -> creating_process_tid = tid;
+    dprintf(0,"%lx %lx %p\n",tid.raw,token_process->creating_process_tid.raw,token_process);
+    token_process -> process_table_index = index;
+    //The callback will reply then
+    nfs_lookup(&mnt_point,execname,process_create_lookup_callback,(uintptr_t) token_process);
+    return 0;
 }
+
 
 /* This is similar to syscall loop but we want
 to run it as a separate thread in order to handle
@@ -929,11 +904,6 @@ void rpc_thread(void)
     
 
     send = 1; /* In most cases we will want to send a reply */
-    //    L4_Word_t token = 0;
-    //    int found = -1;
-    //int num_words; size_t bytes_sent;
-    //fmode_t mode = 0;
-    //int read_encountered = 0;
     switch (TAG_SYSLAB(tag)) {
         case SOS_RPC_GET_TOKEN:
             send = sos_rpc_get_token();

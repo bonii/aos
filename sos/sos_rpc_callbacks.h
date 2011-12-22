@@ -10,6 +10,9 @@ void nfs_readdir_callback(uintptr_t token, int status, int num_entries, struct n
 void nfs_getcookie_callback(uintptr_t token, int status, struct cookie* fh, fattr_t* attr);
 void nfs_read_callback(uintptr_t t, int status, fattr_t *attr, int bytes_read, char *data);
 void nfs_write_callback(uintptr_t token, int status, fattr_t *attr);
+void process_create_lookup_callback(uintptr_t token, int status, struct cookie* fh, fattr_t* attr);
+void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, int bytes_read, char *data);
+
 typedef struct { char chars[FILE_NAME_SIZE]; } filename_t;
 
 extern int filename_iterator;

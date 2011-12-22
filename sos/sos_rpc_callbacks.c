@@ -2,12 +2,13 @@
 #include "sos_rpc.h"
 #include "l4.h"
 #include "libsos.h"
-
+#include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <elf/elf.h>
 
 int filename_iterator;
-
+static L4_Word_t stack_address = 0x7750000;
 filename_t files[MAX_FILES];
 
 void nfs_readdir_callback(uintptr_t token, int status, int num_entries, struct nfs_filename* filenames, int next_cookie)
@@ -91,12 +92,6 @@ void nfs_getcookie_callback(uintptr_t token, int status, struct cookie* fh, fatt
             L4_MsgAppendWord(&msg, ((L4_Word_t*)fh)[i]);
         }
     }
-    /*dprintf(0, "cookie in getcokie_callback: ");
-    for (int i = 0 ; i < FHSIZE; i++)
-    {
-        dprintf(0, "%c", fh->data[i]);
-    }
-    dprintf(0, "\n");*/
     L4_MsgLoad(&msg);
     L4_Send(tid);
 }
@@ -155,4 +150,85 @@ void nfs_write_callback(uintptr_t tokenparam, int status, fattr_t *attr) {
     L4_MsgAppendWord(&msg, bytes_written);
     L4_MsgLoad(&msg);
     L4_Send(tid);
+}
+
+void process_create_lookup_callback(uintptr_t token, int status, struct cookie* fh, fattr_t* attr) {
+  struct token_process_t *token_process = (struct token_process_t *) token;
+  L4_ThreadId_t tidval = token_process -> creating_process_tid;
+  int pageindex = token_process -> process_table_index;
+  dprintf(0,"status value is %d tid %lx %d %p",tidval.raw,pageindex,token_process);
+  L4_Msg_t msg;
+  int errorFlag = 0;
+  if(status != 0) {
+    errorFlag = 1;
+  }
+  if(!errorFlag) {
+    char *elf_file = malloc(attr->size);
+    if(elf_file) {
+      struct cookie *filecookie = (struct cookie *) malloc(sizeof(struct cookie));
+      memcpy(filecookie , fh, sizeof(struct cookie));
+      token_process -> elf_file = elf_file;
+      token_process -> data_read = 0;
+      token_process -> file_size = attr -> size;
+      token_process -> fh = filecookie;
+      nfs_read(fh,0,NFS_READ_SIZE,process_create_read_callback,token);
+    } else {
+      errorFlag = 1;
+    }
+  }
+
+  if(errorFlag) {
+    L4_MsgClear(&msg);
+    L4_MsgAppendWord(&msg,-1);
+    L4_MsgLoad(&msg);
+    L4_Send(token_process -> creating_process_tid);
+    free(token_process);
+  }
+}
+
+void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, int bytes_read, char *data) {
+  int errorFlag = 0;
+  L4_Msg_t msg;
+  struct token_process_t *token_process = (struct token_process_t *) token;
+  if(status == 0) {
+    strcpy(token_process -> elf_file,data);
+    token_process -> data_read += bytes_read;
+    if(token_process -> data_read < token_process -> file_size) {
+      nfs_read(token_process -> fh,token_process -> data_read,NFS_READ_SIZE,process_create_read_callback,token);
+    } else {
+      //We have read the file into elf_file now we need to check the elf format
+      if(elf_checkFile(token_process -> elf_file) != 0) {
+	errorFlag = 1;
+      } else {
+	L4_Word_t entry_point = (L4_Word_t) elf_getEntryPoint(token_process -> elf_file);
+	uint64_t min_memory[3];
+	uint64_t max_memory[3];
+	elf_getMemoryBounds(token_process -> elf_file,0,min_memory,max_memory);
+	//Need to reserve this by the pager
+	errorFlag = !elf_loadFile(token_process -> elf_file,1);
+	//L4_ThreadId newtid = L4_GlobalId((index + 5) << THREADBITS,1);
+	if(!errorFlag) {
+	  //Now we need to change the page table entries from my tid value to the tid of the
+	  //new process
+	  L4_ThreadId_t newtid = sos_task_new(token_process -> process_table_index+5,L4_Myself(),(void *)entry_point,(void *)stack_address);
+	  process_table_add_creation_entry(token_process -> process_table_index,newtid,1);
+	}
+      }
+    }
+  } else {
+    errorFlag = 1;
+  }
+
+  L4_MsgClear(&msg);
+  if(errorFlag) {
+    L4_MsgAppendWord(&msg, -1);
+    process_table_add_creation_entry(token_process -> process_table_index,L4_nilthread,0);
+  } else {
+    L4_MsgAppendWord(&msg, token_process -> process_table_index);
+  }
+  L4_MsgLoad(&msg);
+  L4_Send(token_process -> creating_process_tid);
+  free(token_process -> elf_file);
+  free(token_process -> fh);
+  free(token_process);
 }
