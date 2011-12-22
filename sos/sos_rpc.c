@@ -8,6 +8,7 @@
 #include <serial.h>
 #include "sos_rpc_callbacks.h"
 #include <clock.h>
+#include <elf/elf.h>
 
 struct serial * serial_port = 0;
 
@@ -20,7 +21,6 @@ static read_listener_t console_listeners[MAX_CONSOLE_READERS];
 static process_control_block_t process_table[MAX_PROCESSES];
 static int BUFFER_LOCK;
 static L4_ThreadId_t any_process_list[MAX_PROCESSES];
-
 
 
 static char read_buffer[BUFFER_SIZE];
@@ -831,15 +831,15 @@ static int sos_rpc_process_create(void) {
     for(int k=0;k<MAX_WAITING_TID;k++) {
       process_table[index].waiting_tid[k] = L4_nilthread;
     }
-    struct token_process_t *token_process ;
-    token_process = (struct token_process_t *) malloc(sizeof(struct token_process_t));
-    token_process -> creating_process_tid = tid;
-    dprintf(0,"%lx %lx %p\n",tid.raw,token_process->creating_process_tid.raw,token_process);
-    token_process -> process_table_index = index;
+    struct token_process_t *token_val = (struct token_process_t *) malloc(sizeof(struct token_process_t));
+    token_val -> creating_process_tid = tid;
+    dprintf(0,"%lx %lx %p\n",tid.raw,token_val->creating_process_tid.raw,token_val);
+    token_val -> process_table_index = index;
     //The callback will reply then
-    nfs_lookup(&mnt_point,execname,process_create_lookup_callback,(uintptr_t) token_process);
+    nfs_lookup(&mnt_point,execname,process_create_lookup_callback,(uintptr_t) token_val);
     return 0;
 }
+
 
 
 /* This is similar to syscall loop but we want

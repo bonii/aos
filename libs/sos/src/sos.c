@@ -284,7 +284,7 @@ pid_t process_create(const char *path)
     int result = send_in_one_message(rpc_threadId, SOS_RPC_PROCESS_CREATE, path, strlen(path));
     if(result != -1) {
         //The message was successfully sent, receive the process id from the rpc thread
-        tag = L4_Receive(rpc_threadId);
+        tag = L4_Receive(root_threadId);
         L4_MsgStore(tag,&msg);
         process_id = (pid_t)L4_MsgWord(&msg,0);
     }
