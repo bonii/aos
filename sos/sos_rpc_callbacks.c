@@ -169,6 +169,7 @@ void process_create_lookup_callback(uintptr_t token, int status, struct cookie* 
     if(elf_file) {
       struct cookie *filecookie = (struct cookie *) malloc(sizeof(struct cookie));
       memcpy(filecookie , fh, sizeof(struct cookie));
+      elf_file[0] = 0;
       token_val -> elf_file = elf_file;
       token_val -> data_read = 0;
       token_val -> file_size = attr -> size;
@@ -196,7 +197,7 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
   L4_Msg_t msg;
   struct token_process_t *token_val = (struct token_process_t *) token;
   if(status == 0) {
-    strcpy(token_val -> elf_file,data);
+    strcat(token_val -> elf_file,data);
     token_val -> data_read += bytes_read;
     //L4_KDB_Enter("blu");
     dprintf(0,"Data read %d size %d\n",token_val -> data_read,token_val -> file_size);
@@ -212,9 +213,11 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
 	L4_Word_t entry_point = (L4_Word_t) elf32_getEntryPoint((void *)token_val -> elf_file);
 	uint64_t min_memory[3];
 	uint64_t max_memory[3];
+	dprintf(0,"We are here %lx\n",entry_point);
 	elf_getMemoryBounds(token_val -> elf_file,0,min_memory,max_memory);
 	//Need to reserve this by the pager
 	errorFlag = !elf_loadFile(token_val -> elf_file,1);
+	dprintf(0,"We are here too");
 	//L4_ThreadId newtid = L4_GlobalId((index + 5) << THREADBITS,1);
 	if(!errorFlag) {
 	  //Now we need to change the page table entries from my tid value to the tid of the
