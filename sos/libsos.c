@@ -321,6 +321,18 @@ sos_task_new(L4_Word_t task, L4_ThreadId_t pager,
 {
     // HACK: Workaround for compiler bug, volatile qualifier stops the internal
     // compiler error.
+    L4_ThreadId_t tid = sos_thread_create(task,pager);
+    L4_ThreadId_t res = sos_thread_activate(tid,pager,entrypoint,stack);
+    return res;
+}
+
+int sos_delete_task(L4_ThreadId_t tid, L4_ThreadId_t pager) {
+    return L4_ThreadControl(tid, L4_nilthread, root_thread_g, pager,
+			    L4_anythread, L4_anythread, (void *) utcb_base_s);
+}
+
+L4_ThreadId_t 
+sos_thread_create(L4_Word_t task,L4_ThreadId_t pager) {
     volatile uint32_t taskId = task << THREADBITS;
     int res;
 
@@ -336,9 +348,13 @@ sos_task_new(L4_Word_t task, L4_ThreadId_t pager,
     res = L4_SpaceControl(tid, 0, kip_fpage_s, utcb_fpage_s, &dummy);
     if (!res)
 	return ((L4_ThreadId_t) { raw : -2});
+    
+    return tid;
+}
 
-    // Activate thread
-    res = L4_ThreadControl(tid, tid, root_thread_g,
+L4_ThreadId_t 
+sos_thread_activate(L4_ThreadId_t tid,L4_ThreadId_t pager,void *entrypoint, void *stack) {
+    int res = L4_ThreadControl(tid, tid, root_thread_g,
 	    pager, L4_anythread, L4_anythread, (void *) utcb_base_s);
     if (!res)
 	return ((L4_ThreadId_t) { raw : -3});
@@ -346,11 +362,6 @@ sos_task_new(L4_Word_t task, L4_ThreadId_t pager,
     L4_Start_SpIp(tid, (L4_Word_t) stack, (L4_Word_t) entrypoint);
 
     return tid;
-}
-
-int sos_delete_task(L4_ThreadId_t tid, L4_ThreadId_t pager) {
-    return L4_ThreadControl(tid, L4_nilthread, root_thread_g, pager,
-			    L4_anythread, L4_anythread, (void *) utcb_base_s);
 }
 
 L4_BootRec_t *

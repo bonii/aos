@@ -10,7 +10,8 @@ extern void initialise_swap_callback(uintptr_t token,int status,struct cookie *f
 extern void pager_write_callback(uintptr_t token,int status, fattr_t *attr);
 extern void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_read,char *data);
 extern void unmap_process(L4_ThreadId_t tid_killed);
-
+extern int load_code_segment(char *elfFile,L4_ThreadId_t new_tid);
+extern int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid);
 #define PTE_SENTINEL -1
 #define UNDEFINED_MEMORY -1
 #define VIRTUAL(addr) (addr >= 0x2000000)

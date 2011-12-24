@@ -29,22 +29,182 @@
 #include "libsos.h"
 #include "frames.h"
 #include "sos_rpc.h"
-
+#include <elf/elf.h>
 static char SWAPFILE[] = "swapfile";
-
-//static head_of_table = 0;
-//static tail_of_pagetable = 0;
 
 static sos_PTE* page_table = 0;
 static L4_Word_t new_low = 0;
 static int numPTE = 0;
-//static int most_recently_accessed = PTE_SENTINEL;
 static sos_swap swap_table[MAX_SWAP_ENTRIES];
 static int swapInitialised = 0;
 static struct cookie* swapcookie = 0;
 static int swap_file_size = 0;
 static int head_free_swap = 0;
 static int send = 1;
+
+static int copy_memory_to_multiple_frames(L4_Word_t skew,uintptr_t src_index,int len,L4_Word_t *dest,L4_Word_t src,int memcpyflag,L4_Word_t *base_virtual_address,L4_ThreadId_t new_tid) {
+  while((len + skew) > PAGESIZE) {
+    *dest = frame_alloc();
+    if(dest) {
+      if(memcpyflag)
+	memcpy((void *)((L4_Word_t) *dest + skew), (void*)((uintptr_t) src + src_index),PAGESIZE - skew);
+      else
+	//We will pass skew value 0 for memset
+	memset((void *)((L4_Word_t) *dest + skew), 0,PAGESIZE - skew);
+      src_index += PAGESIZE - skew;
+      len -= PAGESIZE - skew;
+      skew = 0;
+      page_table[(*dest-new_low)/PAGESIZE].tid = new_tid;
+      page_table[(*dest-new_low)/PAGESIZE].pinned = 1;
+      L4_Fpage_t targetpage = L4_FpageLog2(*base_virtual_address,12);
+      *base_virtual_address += PAGESIZE;
+      //Now map fpage
+      L4_Set_Rights(&targetpage,L4_FullyAccessible);
+      L4_PhysDesc_t phys = L4_PhysDesc(*dest, L4_DefaultMemory);
+      if ( !L4_MapFpage(new_tid, targetpage, phys) ) {
+	unmap_process(new_tid);
+      }
+    } else {
+      //Oops no frames need to bail out
+      unmap_process(new_tid);
+      return -1;
+    }
+  }
+  
+  //Out here temp_len is <= PAGESIZE
+  if(len > 0) {
+    *dest = frame_alloc();
+    if(dest) {
+      if(memcpyflag)
+	memcpy((void *)((L4_Word_t) *dest + skew), (void*)((uintptr_t) src + src_index),len - skew);
+      else
+	//We will pass skew value 0 for memset
+	memset((void *)(L4_Word_t) *dest, 0,len - skew);
+      page_table[(*dest-new_low)/PAGESIZE].tid = new_tid;
+      page_table[(*dest-new_low)/PAGESIZE].pinned = 1;
+      L4_Fpage_t targetpage = L4_FpageLog2(*base_virtual_address,12);
+      *base_virtual_address += PAGESIZE;
+      //Now map fpage
+      L4_Set_Rights(&targetpage,L4_FullyAccessible);
+      L4_PhysDesc_t phys = L4_PhysDesc(*dest, L4_DefaultMemory);
+      if ( !L4_MapFpage(new_tid, targetpage, phys) ) {
+	unmap_process(new_tid);
+      }
+    } else {
+      //Oops no frames bail out
+      unmap_process(new_tid);
+      return -1;
+    }
+  }
+  return len-skew;
+}
+
+static int mapSegment(void *elffile,L4_ThreadId_t new_tid,int i) {
+  L4_Word_t skew = elf_getProgramHeaderVaddr(elffile,i) % PAGESIZE;
+  uintptr_t src_index = 0;
+  L4_Word_t dest = 0;
+  size_t len,temp_len;
+  temp_len = len = elf_getProgramHeaderFileSize(elffile, i);
+  L4_Word_t base_virtual_address = ((L4_Word_t) elf_getProgramHeaderVaddr(elffile, i) / PAGESIZE) * PAGESIZE;
+
+  uint64_t src = (uint64_t) (uintptr_t) elffile + elf_getProgramHeaderOffset(elffile, i);
+
+  L4_Word_t skew_for_memset = copy_memory_to_multiple_frames(skew,src_index,len,&dest,src,1,&base_virtual_address,new_tid);
+  temp_len = elf_getProgramHeaderMemorySize(elffile, i) - len;
+  
+  if(skew_for_memset) {
+    //We need to write in remaining frame where we memcopied
+    memset((void *)((L4_Word_t) dest + skew_for_memset),0,(temp_len > PAGESIZE - skew_for_memset) ? (PAGESIZE - skew_for_memset) :temp_len);
+    if(temp_len > PAGESIZE - skew_for_memset) {
+      temp_len -= (PAGESIZE - skew_for_memset);
+    } else {
+      temp_len = 0;
+    }
+    skew_for_memset = 0;
+  } else if(skew_for_memset < 0) {
+    return -1;
+  }
+  
+  if(temp_len > 0) {
+    return copy_memory_to_multiple_frames(0,src_index,len,&dest,src,0,&base_virtual_address,new_tid);
+  }
+  return 0;
+}
+
+int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid) {
+  uint32_t min[2];
+  uint32_t max[2];
+  elf_getMemoryBounds(elfFile, 0, (uint64_t*)min, (uint64_t*)max);
+  //Now we need to reserve memory between min and max
+  L4_Word_t lower_address = ((L4_Word_t) min[1] / PAGESIZE) * PAGESIZE; 
+  L4_Word_t upper_address = ((L4_Word_t) max[1] / PAGESIZE) * PAGESIZE;
+  printf("%lx %lx %lx %lx",lower_address,upper_address,(L4_Word_t) min[0],(L4_Word_t) max[0]);
+  while(lower_address <= upper_address) {
+    L4_Word_t frame = frame_alloc();
+    if(!frame) {
+      //Oops out of frames
+      unmap_process(new_tid);
+      return -1;
+    } else {
+      L4_Fpage_t targetpage = L4_FpageLog2(lower_address,12);
+      lower_address += PAGESIZE;
+      //Now map fpage
+      L4_Set_Rights(&targetpage,L4_FullyAccessible);
+      L4_PhysDesc_t phys = L4_PhysDesc(frame, L4_DefaultMemory);
+      //Map the frame to root task but enter entries in pagetable with tid since we will update the mappings once elf loading is done
+      if (L4_MapFpage(L4_Myself(), targetpage, phys) ) {
+	//printf("Mapped targetpage %d address %lx to %lx\n",targetpage.X.b,frame,L4_Myself().raw);
+	page_table[frame-new_low/PAGESIZE].tid = new_tid;
+	page_table[frame-new_low/PAGESIZE].pinned = 1;
+	page_table[frame-new_low/PAGESIZE].pageNo = targetpage;
+      } else {
+	unmap_process(new_tid);
+      }
+    }
+  }
+  /*	for(int i=0; i < elf_getNumProgramHeaders(elfFile); i++) {
+	  uint64_t dest;
+		
+		dest = elf_getProgramHeaderVaddr(elfFile, i);
+		printf("dest -> %lx\n",(L4_Word_t) dest);
+		
+		}*/
+
+  //Not necessary but does not hurt, can remove later
+  L4_CacheFlushAll();
+  //Now we have mapped the pages, now load elf_file should work
+  if(elf_loadFile(elfFile,0) == 1) {
+      //Elffile was successfully loaded
+      //Update page table entries to the new process
+    for(int i=0;i<numPTE;i++) {
+      if(L4_ThreadNo(new_tid) == L4_ThreadNo(page_table[i].tid)) {
+	//Now remap the pages which were mapped to root task to the new tid
+	L4_UnmapFpage(L4_Myself(),page_table[i].pageNo);
+	L4_PhysDesc_t phys = L4_PhysDesc(new_low + i * PAGESIZE, L4_DefaultMemory);
+	if(!L4_MapFpage(new_tid, page_table[i].pageNo, phys)) {
+	  unmap_process(new_tid);
+	  return -1;
+	}
+	//printf("Mapped targetpage %d address %lx to %lx\n",page_table[i].pageNo.X.b,new_low + i * PAGESIZE,new_tid.raw);
+      }
+    }
+  } else {
+    unmap_process(new_tid);
+  }
+ return 0;
+}
+
+int load_code_segment(char *elfFile,L4_ThreadId_t new_tid) {
+  int returnvalue = 0;
+  for(int i=0; i < elf_getNumProgramHeaders(elfFile); i++) {
+    returnvalue = mapSegment(elfFile,new_tid,i);
+    if(returnvalue < 0) {
+      //Error
+      break;
+    }
+  }
+  return returnvalue;
+}
 
 static void writeToSwap(int index,int readSwapIndex,L4_ThreadId_t tid,L4_Fpage_t fpage) {
   if(!swapInitialised) {
@@ -468,6 +628,7 @@ void unmap_process(L4_ThreadId_t tid_killed) {
 	page_table[i].being_updated = 0;
 	page_table[i].error_in_transfer = 0;
         page_table[i].pinned = 0;
+	frame_free(new_low + i *PAGESIZE);
     }
   }
   

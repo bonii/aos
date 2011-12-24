@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <elf/elf.h>
 #include <elf/elf32.h>
+#include "pager.h"
 
 int filename_iterator;
 static L4_Word_t stack_address = 0x7750000;
@@ -192,47 +193,52 @@ void process_create_lookup_callback(uintptr_t token, int status, struct cookie* 
 }
 
 void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, int bytes_read, char *data) {
-  dprintf(0,"Received process_create read callback with status %d\n",status);
+  //dprintf(0,"Received process_create read callback with status %d\n",status);
   int errorFlag = 0,completedFlag=0;
   L4_Msg_t msg;
   struct token_process_t *token_val = (struct token_process_t *) token;
   if(status == 0) {
-    strcat(token_val -> elf_file,data);
+    memcpy(token_val -> elf_file + token_val -> data_read,data,bytes_read);
     token_val -> data_read += bytes_read;
     //L4_KDB_Enter("blu");
-    dprintf(0,"Data read %d size %d\n",token_val -> data_read,token_val -> file_size);
+    //dprintf(0,"Data read %d size %d\n",token_val -> data_read,token_val -> file_size);
     if(token_val -> data_read < token_val -> file_size) {
       nfs_read(token_val -> fh,token_val -> data_read,NFS_READ_SIZE,process_create_read_callback,token);
     } else {
-      int checkFailed =  elf32_checkFile((void *)token_val -> elf_file);
+      token_val -> elf_file [token_val -> file_size] = 0;
+      int checkFailed =  elf_checkFile((void *)token_val -> elf_file);
       dprintf(0,"Finished process_create read callbacks %d\n",checkFailed);
       //We have read the file into elf_file now we need to check the elf format
       if(checkFailed) {
 	errorFlag = 1;
       } else {
-	L4_Word_t entry_point = (L4_Word_t) elf32_getEntryPoint((void *)token_val -> elf_file);
-	uint64_t min_memory[3];
-	uint64_t max_memory[3];
+	L4_Word_t entry_point = (L4_Word_t) elf_getEntryPoint((void *)token_val -> elf_file);
 	dprintf(0,"We are here %lx\n",entry_point);
-	elf_getMemoryBounds(token_val -> elf_file,0,min_memory,max_memory);
-	//Need to reserve this by the pager
-	errorFlag = !elf_loadFile(token_val -> elf_file,1);
-	dprintf(0,"We are here too");
-	//L4_ThreadId newtid = L4_GlobalId((index + 5) << THREADBITS,1);
+	L4_ThreadId_t newtid = sos_thread_create(token_val -> process_table_index + 5,L4_Myself());
+	dprintf(0,"New tid val is %lx\n",newtid.raw);
+	errorFlag = load_code_segment_virtual(token_val -> elf_file,newtid);
+	dprintf(0,"Are we here ?");
+	if(errorFlag < 0)
+	  errorFlag = 1;
+	else
+	  errorFlag = 0;
 	if(!errorFlag) {
-	  //Now we need to change the page table entries from my tid value to the tid of the
-	  //new process
-	  L4_ThreadId_t newtid = sos_task_new(token_val -> process_table_index+5,L4_Myself(),(void *)entry_point,(void *)stack_address);
+	  L4_KDB_Enter("Foo bam");
+	  //Activate the tid and we are done
+	  dprintf(0,"Activating thread\n");
+	  L4_ThreadId_t new_tid_val = sos_thread_activate(newtid,L4_Myself(),(void *) entry_point,(void *)stack_address);
 	  process_table_add_creation_entry(token_val -> process_table_index,newtid,1);
-	  completedFlag = 1;
-	  dprintf(0,"Tid created value %lx\n",newtid.raw);
+	  dprintf(0,"tid value is %lx\n",new_tid_val.raw);
 	}
       }
+      completedFlag = 1;
     }
   } else {
     errorFlag = 1;
   }
   
+  //We dont send a message unless we have an error in one of the callbacks or we finished 
+  //processing the last callback
   if(!errorFlag && !completedFlag) {
     return;
   }

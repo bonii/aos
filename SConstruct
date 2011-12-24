@@ -51,7 +51,7 @@ timer_syscall_milestone = 3
 
 # Use the app_env environment for building everything else that will run in the
 # userland context.  Can't add libs/sos 'cause it doesn't exist yet.
-app_env=env.Copy("userland", LINKFLAGS=["-Ttext=0x1000"])
+app_env=env.Copy("userland", LINKFLAGS=["-Ttext=0x10000000"])
 app_env.AddLibrary("l4")
 app_env.AddLibrary("c", system="sos")
 app_env.AddLibrary("clock")
@@ -81,13 +81,15 @@ filesystem_apps=[]
 filesystem_apps.append(app_env.Application("hi"))
 filesystem_apps.append(app_env.Application("test1"))
 filesystem_apps.append(app_env.Application("test2"))
-
 appnames = ["hi","test1","test2"]
-for x in appnames:
-    shutil.copyfile("./build/userland/%s/%s" % (x,x),"%s/%s" %
-("/mnt/hgfs/nfs",x));
 
-Default(bootimg)
+for x in appnames:
+   shutil.copyfile("./build/userland/%s/%s" % (x,x),"%s/%s" %
+("/local/export",x));
+
+
+Default(bootimg) # Default build target is the bootimage.
 Default(filesystem_apps)
+
 #Default(app_env.Install ("/mnt/hgfs/nfs",filesystem_apps))
 # vim:ft=python:
