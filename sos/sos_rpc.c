@@ -639,7 +639,7 @@ static int sos_rpc_getdirent(void)
 
 static int sos_rpc_process_delete(void) {
     int pid_kill = (int) L4_MsgWord(&msg,0);
-    dprintf(0,"Got a process delete %d %lx",pid_kill,L4_ThreadNo(tid));
+    dprintf(0,"Got a process delete %d %lx by %lx",pid_kill,L4_ThreadNo(tid),L4_Myself().raw);
     L4_Msg_t msg1;
     L4_MsgTag_t tag1;
     L4_ThreadId_t tid_kill = L4_nilthread;
@@ -765,8 +765,10 @@ static int sos_rpc_process_stat(void) {
     int max_processes = L4_MsgWord(&msg,0);
     int returnval = 0;
     for(int i=0,count=1;i<MAX_PROCESSES && count <= max_processes;i++) {
+
       if(L4_ThreadNo(process_table[i].tid) != L4_ThreadNo(L4_nilthread)) {
 	//We need to send the message
+	L4_KDB_Enter("hell");
 	count++;
 	returnval = send_in_one_message(tid,SEND_STAT_COMMAND,process_table[i].command,strlen(process_table[i].command));
 	tag = L4_Receive(tid);
@@ -791,6 +793,7 @@ static int sos_rpc_process_stat(void) {
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SEND_STAT_END));
     L4_MsgLoad(&msg);
+    L4_KDB_Enter("q");
     return 1;
 }
 

@@ -209,12 +209,12 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
       int checkFailed =  elf_checkFile((void *)token_val -> elf_file);
       dprintf(0,"Finished process_create read callbacks %d\n",checkFailed);
       //We have read the file into elf_file now we need to check the elf format
-      if(checkFailed) {
+      if(checkFailed != 0) {
 	errorFlag = 1;
       } else {
 	L4_Word_t entry_point = (L4_Word_t) elf_getEntryPoint((void *)token_val -> elf_file);
 	dprintf(0,"We are here %lx\n",entry_point);
-	L4_ThreadId_t newtid = sos_thread_create(token_val -> process_table_index + 5,L4_Myself());
+	L4_ThreadId_t newtid = sos_thread_create(token_val -> process_table_index + 5);
 	dprintf(0,"New tid val is %lx\n",newtid.raw);
 	errorFlag = load_code_segment_virtual(token_val -> elf_file,newtid);
 	dprintf(0,"Are we here ?");
