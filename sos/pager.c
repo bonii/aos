@@ -50,9 +50,10 @@ int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid) {
   //Now we need to reserve memory between min and max
   L4_Word_t lower_address = ((L4_Word_t) min[1] / PAGESIZE) * PAGESIZE; 
   L4_Word_t upper_address = ((L4_Word_t) max[1] / PAGESIZE) * PAGESIZE;
-  printf("%lx %lx %lx %lx",lower_address,upper_address,(L4_Word_t) min[0],(L4_Word_t) max[0]);
+  printf("%lx %lx %lx %lx %lx",lower_address,upper_address,(L4_Word_t) min[0],(L4_Word_t) max[0],new_tid.raw);
   while(lower_address <= upper_address) {
     L4_Word_t frame = frame_alloc();
+
     if(!frame) {
       //Oops out of frames
       unmap_process(new_tid);
@@ -66,9 +67,10 @@ int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid) {
       //Map the frame to root task but enter entries in pagetable with tid since we will update the mappings once elf loading is done
       if (L4_MapFpage(L4_Myself(), targetpage, phys) ) {
 	//printf("Mapped targetpage %d address %lx to %lx\n",targetpage.X.b,frame,L4_Myself().raw);
-	page_table[frame-new_low/PAGESIZE].tid = new_tid;
-	page_table[frame-new_low/PAGESIZE].pinned = 1;
-	page_table[frame-new_low/PAGESIZE].pageNo = targetpage;
+	printf("Allocating frame %lx to %lx %d\n",frame,new_tid.raw,targetpage.X.b);
+	page_table[(frame-new_low)/PAGESIZE].tid = new_tid;
+	page_table[(frame-new_low)/PAGESIZE].pinned = 1;
+	page_table[(frame-new_low)/PAGESIZE].pageNo = targetpage;
       } else {
 	unmap_process(new_tid);
       }
@@ -93,7 +95,7 @@ int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid) {
     for(int i=0;i<numPTE;i++) {
       if(L4_ThreadNo(new_tid) == L4_ThreadNo(page_table[i].tid)) {
 	//Now remap the pages which were mapped to root task to the new tid
-	//L4_UnmapFpage(L4_Myself(),page_table[i].pageNo);
+	L4_UnmapFpage(L4_Myself(),page_table[i].pageNo);
 	L4_PhysDesc_t phys = L4_PhysDesc(new_low + i * PAGESIZE, L4_DefaultMemory);
 	if(!L4_MapFpage(new_tid, page_table[i].pageNo, phys)) {
 	  unmap_process(new_tid);
@@ -105,6 +107,7 @@ int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid) {
   } else {
     unmap_process(new_tid);
   }
+  L4_CacheFlushAll();
  return 0;
 }
 
@@ -526,6 +529,7 @@ void unmap_process(L4_ThreadId_t tid_killed) {
   for(int i=0;i<numPTE;i++) {
     if(L4_ThreadNo(page_table[i].tid) == L4_ThreadNo(tid_killed)) {
 	L4_UnmapFpage(page_table[i].tid,page_table[i].pageNo);      
+	frame_free(new_low + i * PAGESIZE);
         page_table[i].tid = L4_nilthread;
 	page_table[i].referenced = 0;
 	page_table[i].dirty = 0;
@@ -533,7 +537,7 @@ void unmap_process(L4_ThreadId_t tid_killed) {
 	page_table[i].error_in_transfer = 0;
         page_table[i].pinned = 0;
 	//This should work but somehow if we run frame_free and then do a ps it crashes with pager accesses 
-	frame_free(new_low + i * PAGESIZE);
+
 	printf("Freeing frame %lx\n",new_low + i * PAGESIZE);
     }
   }
@@ -555,8 +559,8 @@ pager(L4_ThreadId_t tid, L4_Msg_t *msgP)
     send = 1;
     // Get the faulting address
     L4_Word_t addr = L4_MsgWord(msgP, 0);
-    L4_Word_t physicalAddress;
-    L4_Word_t permission;
+    L4_Word_t physicalAddress = 0;
+    L4_Word_t permission = 0;
     L4_MsgTag_t tag;
     // Alignment
     printf("address location: %lx ",addr);
@@ -564,14 +568,25 @@ pager(L4_ThreadId_t tid, L4_Msg_t *msgP)
     tag = L4_MsgMsgTag(msgP);
     L4_Word_t access_type = L4_Label(tag) & 0x07;
 
-    printf("pager invoked addr=%lx by %lx for access 0x%lx\n", addr,L4_ThreadNo(tid),access_type);
+    printf("pager invoked addr=%lx by %lx %lx for access 0x%lx\n", addr,L4_ThreadNo(tid),tid.raw,access_type);
 
     // Construct fpage IPC message
     L4_Fpage_t targetFpage = L4_FpageLog2(addr, 12);
     
     if(VIRTUAL(addr)) 
     {
-
+      
+      if(addr >= 0x10000000) {
+	//Code segment
+	printf("Code segment : ->\n");
+	int inPage = isInPage(tid,targetFpage);
+	if(inPage == -1) {
+	  //It should be in page table
+	} else {
+	  physicalAddress = new_low + inPage*PAGESIZE;
+	  permission = L4_FullyAccessible;
+	}
+      } else {
     	int inPage = isInPage(tid, targetFpage);
     	if (inPage == -1)
     	{
@@ -594,8 +609,9 @@ pager(L4_ThreadId_t tid, L4_Msg_t *msgP)
 	      permission = L4_Readable;
 	    }
     	}
-    	//All virtual addresses are fully accessible
+    	
 	    printf("physical address is %lx\n", physicalAddress);
+      }
     } else {
         // we need to map physical addresses 1:1
         physicalAddress = addr;

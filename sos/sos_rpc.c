@@ -693,7 +693,7 @@ static int sos_rpc_process_delete(void) {
 	//Now remove the entries from the pagetable for the process
       L4_MsgClear(&msg1);
       L4_Set_MsgLabel(&msg1,MAKETAG_SYSLAB(SOS_SYSCALL_REMOVE_TID_PAGE));
-      L4_MsgAppendWord(&msg1,tid.raw);
+      L4_MsgAppendWord(&msg1,tid_kill.raw);
       L4_MsgLoad(&msg1);
       L4_Send(L4_Pager());
     }
@@ -768,7 +768,7 @@ static int sos_rpc_process_stat(void) {
 
       if(L4_ThreadNo(process_table[i].tid) != L4_ThreadNo(L4_nilthread)) {
 	//We need to send the message
-	L4_KDB_Enter("hell");
+	//L4_KDB_Enter("hell");
 	count++;
 	returnval = send_in_one_message(tid,SEND_STAT_COMMAND,process_table[i].command,strlen(process_table[i].command));
 	tag = L4_Receive(tid);
@@ -793,7 +793,7 @@ static int sos_rpc_process_stat(void) {
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SEND_STAT_END));
     L4_MsgLoad(&msg);
-    L4_KDB_Enter("q");
+    //L4_KDB_Enter("q");
     return 1;
 }
 

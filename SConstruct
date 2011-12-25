@@ -87,7 +87,6 @@ for x in appnames:
    shutil.copyfile("./build/userland/%s/%s" % (x,x),"%s/%s" %
 ("/local/export",x));
 
-
 Default(bootimg) # Default build target is the bootimage.
 Default(filesystem_apps)
 

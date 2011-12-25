@@ -61,11 +61,14 @@ init_thread(void)
 	    continue;
 	// Must be a SimpleExec boot info record
 	dprintf(0, "Found exec: %d %s\n", i, L4_SimpleExec_Cmdline(binfo_rec));
-
+	
+	dprintf(0,"%lx %lx\n", L4_Myself().raw,L4_Pager().raw);
+	L4_KDB_Enter("Wool");
 	// Start a new task with this program
 	L4_ThreadId_t newtid = sos_task_new(++task, L4_Pager(), 
 		(void *) L4_SimpleExec_TextVstart(binfo_rec),
 		(void *) user_stack_address);
+	dprintf(0,"Task id %lx\n",newtid.raw);
 	dprintf(0, "Created task: %lx\n", sos_tid2task(newtid));
 	dprintf(0, "Root thread ID: %lx\n", L4_Myself());
 	/*printf("textVstart: %lx, textPstart: %lx\n, dataVstart: %lx, dataPstart: %lx\n, bssVstart: %lx, bssPstart: %lx\n", 
@@ -219,14 +222,16 @@ main (void)
 	dprintf(0, "initializing pager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
     L4_Word_t new_low = pager_init((low + HEAP_SIZE), high);
     set_new_low(new_low);
-
-    dprintf(0, "frame manager initialized\n");
+    
+    dprintf(0, "frame manager initialized %lx\n",L4_Myself().raw);
+    L4_KDB_Enter("Woo");
     // Spawn the setup thread which completes the rest of the initialisation,
     // leaving this thread free to act as a pager and interrupt handler.
-    (void) sos_thread_new(&init_thread, (L4_Word_t*) init_stack_address);
+    L4_ThreadId_t init_id = sos_thread_new(&init_thread, (L4_Word_t*) init_stack_address);
     // Spawn separate RPC thread
     rpc_threadId = sos_thread_new(&rpc_thread, (L4_Word_t*) rpc_stack_address);
     int returnVal = start_timer();
+    dprintf(0,"%lx %lx %lx %lx\n",L4_Myself().raw,L4_Pager().raw,rpc_threadId.raw,init_id.raw);
     dprintf(0,"The timer status is %d\n",returnVal);
     dprintf(0,"The timer value is %llu\n",time_stamp());
     for(int i=1;i<100000;i++);
