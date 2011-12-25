@@ -50,6 +50,8 @@ init_thread(void)
     // Initialise the network for libsos_logf_init
     network_init();
     printf("Initialising swap ...");
+    //Initialise swap which creates the swap file if it is not present and needs to be done
+    //after network init
     initialise_swap();
     printf("Initialised swap");
     // Loop through the BootInfo starting executables
@@ -61,9 +63,6 @@ init_thread(void)
 	    continue;
 	// Must be a SimpleExec boot info record
 	dprintf(0, "Found exec: %d %s\n", i, L4_SimpleExec_Cmdline(binfo_rec));
-	
-	dprintf(0,"%lx %lx\n", L4_Myself().raw,L4_Pager().raw);
-	L4_KDB_Enter("Wool");
 	// Start a new task with this program
 	L4_ThreadId_t newtid = sos_task_new(++task, L4_Pager(), 
 		(void *) L4_SimpleExec_TextVstart(binfo_rec),
@@ -71,16 +70,7 @@ init_thread(void)
 	dprintf(0,"Task id %lx\n",newtid.raw);
 	dprintf(0, "Created task: %lx\n", sos_tid2task(newtid));
 	dprintf(0, "Root thread ID: %lx\n", L4_Myself());
-	/*printf("textVstart: %lx, textPstart: %lx\n, dataVstart: %lx, dataPstart: %lx\n, bssVstart: %lx, bssPstart: %lx\n", 
-	L4_SimpleExec_TextVstart(binfo_rec),
-	L4_SimpleExec_TextPstart(binfo_rec),
-	L4_SimpleExec_DataVstart(binfo_rec),
-	L4_SimpleExec_DataPstart(binfo_rec),
-	L4_SimpleExec_BssVstart(binfo_rec),
-	L4_SimpleExec_BssPstart(binfo_rec));*/
     }
-    //set_address_and_binfo(binfo_rec_list,user_stack_address,counter);
-    //stack_address = user_stack_address;
     // Thread finished - block forever
     for (;;)
 	sos_usleep(30 * 1000 * 1000);
@@ -148,19 +138,13 @@ syscall_loop(void)
 	    break;
 
 	case L4_INTERRUPT:
-	    //dprintf(0, "interrupt received\n");
             if(L4_ThreadNo(tid) == NSLU2_TIMESTAMP_IRQ) {
-              //Got the timer interrupt
-              //dprintf(0,"Got timestamp timer interrupt Woo\n");
               handle_timer_timestamp_interrupt();
-              //dprintf(0,"Finished clock handler, composing message\n");
               L4_MsgClear(&msg);
               L4_MsgLoad(&msg);
             }  else if(L4_ThreadNo(tid) == NSLU2_TIMER1_IRQ) {
               //Got the timer interrupt
-              //dprintf(0,"Got timer interrupt Boo\n");
               handle_timer_interrupt();
-              //dprintf(0,"Finished timer handler, composing message\n");
               L4_MsgClear(&msg);
               L4_MsgLoad(&msg);
 	    } else {
@@ -168,11 +152,9 @@ syscall_loop(void)
             }
 	    break;
 	case SOS_SYSCALL_UNMAP_USER_ADDRESS_SPACE:
-	    //dprintf(0, "unmap call incoming");
 	    send = 0;
 	    unmap_all();
 	    break;
-
 	case SOS_SYSCALL_FIND_RPC_THREAD:
 	  //Add message to send the thread id of rpc server
 	    dprintf(2, "find_rpc_thread called\n");
@@ -184,7 +166,7 @@ syscall_loop(void)
 	    L4_MsgLoad(&msg);
 	    break;
 	case SOS_SYSCALL_REMOVE_TID_PAGE :
-	  dprintf(0, "Unmap received for process kill");
+	  dprintf(2, "Unmap received for process kill");
 	  send = 0;
 	  unmap_process((L4_ThreadId_t) L4_MsgWord(&msg,0));
 	  break;
@@ -219,24 +201,24 @@ main (void)
 	dprintf(0, "initializing frame manager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
 
     frame_init(low + HEAP_SIZE, high);
-	dprintf(0, "initializing pager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
+    dprintf(0, "initializing pager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
     L4_Word_t new_low = pager_init((low + HEAP_SIZE), high);
     set_new_low(new_low);
     
-    dprintf(0, "frame manager initialized %lx\n",L4_Myself().raw);
-    L4_KDB_Enter("Woo");
+    dprintf(0, "frame manager initialized\n");
+    //L4_KDB_Enter("Woo");
     // Spawn the setup thread which completes the rest of the initialisation,
     // leaving this thread free to act as a pager and interrupt handler.
-    L4_ThreadId_t init_id = sos_thread_new(&init_thread, (L4_Word_t*) init_stack_address);
+    (void) sos_thread_new(&init_thread, (L4_Word_t*) init_stack_address);
     // Spawn separate RPC thread
     rpc_threadId = sos_thread_new(&rpc_thread, (L4_Word_t*) rpc_stack_address);
-    int returnVal = start_timer();
-    dprintf(0,"%lx %lx %lx %lx\n",L4_Myself().raw,L4_Pager().raw,rpc_threadId.raw,init_id.raw);
+    start_timer();
+    /*dprintf(0,"%lx %lx %lx %lx\n",L4_Myself().raw,L4_Pager().raw,rpc_threadId.raw,init_id.raw);
     dprintf(0,"The timer status is %d\n",returnVal);
     dprintf(0,"The timer value is %llu\n",time_stamp());
     for(int i=1;i<100000;i++);
     dprintf(0,"The timer value is %u\n",time_stamp());
-    for(int i=1;i<100000;i++);
+    for(int i=1;i<100000;i++);*/
     //stop_timer();
     syscall_loop(); // Enter the syscall loop
     /* Not reached */

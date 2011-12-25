@@ -6,13 +6,15 @@
 #include <assert.h>
 #include "../../../helpers/ipc_defs.h"
 
-// to be implemented!
-
 fildes_t stdout_fd = 0;
 
 static L4_ThreadId_t rpc_threadId;
 static L4_ThreadId_t root_threadId;
 
+/*
+ * Boot strapping method. Initialise the rpc and root thread ids to be used
+ * by other function calls
+ */
 static void sos_init(void)
 {
     L4_Msg_t msg;
@@ -28,7 +30,10 @@ static void sos_init(void)
 
 }
 
-
+/*
+ * Function to send data large enough for a message in one message by packing it in the message
+ * registers. No sanity check is done to see if the data fits in one message
+ */
 static int send_in_one_message(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, int count)
 {
    	L4_Msg_t msg;
@@ -55,13 +60,16 @@ static int send_in_one_message(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const
 	return 0;
 }
 
+/*
+ * Client side implementation of the open system call defined in the header
+ */
 fildes_t open(const char *path, fmode_t mode)
 { 
   /* Generate a message for the kernel for the token */
-  long start = time_stamp();
    while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
    }
+   //Pack file name and mode in a char buffer
     char file_name_mode[FILE_NAME_MODE_SIZE];
     for (int i = 0; i < FILE_NAME_MODE_SIZE; i++)
     {
@@ -74,23 +82,23 @@ fildes_t open(const char *path, fmode_t mode)
     
     strcpy(file_name_mode, path);
     file_name_mode[FILE_NAME_SIZE] = mode;
-    
+    //Send the buffer(buffer size has been set to be within one message size)
     int result = send_in_one_message(rpc_threadId, SOS_RPC_GET_TOKEN, file_name_mode, FILE_NAME_MODE_SIZE);
+    //Failure if message could not be sent
     if (result < 0) return result;
     L4_MsgTag_t tag;
     L4_Msg_t msg;
     L4_Accept(L4_UntypedWordsAcceptor);
     tag = L4_Receive(rpc_threadId);
     L4_MsgStore(tag, &msg);
-    //printf("words: %d\n", tag.X.u);
     assert(tag.X.u == 1);
     fildes_t token = (fildes_t) L4_MsgWord(&msg, 0);
-    //printf("got token %d\n", token);
-    long end = time_stamp();
-    if (0) printf("Time for open: %ld\n",(end-start));
     return token;
 }
 
+/*
+ * Client side implementation of file close
+ */
 int close(fildes_t file)
 {
     int success = 0;
@@ -112,12 +120,16 @@ int close(fildes_t file)
     return success;
 }
 
+/*
+ * Client side implementation of read system call. It blocks until the number of bytes
+ * to be read are received or a newline character is encountered
+ */
 int read(fildes_t file, char *buf, size_t nbyte)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
     }
-    long start = time_stamp();
+
     L4_Msg_t msg;
     L4_MsgTag_t tag;
     
@@ -128,50 +140,48 @@ int read(fildes_t file, char *buf, size_t nbyte)
     L4_MsgLoad(&msg);
 
     L4_Accept(L4_UntypedWordsAcceptor);
-    //printf("Here then %lx %lx\n",L4_ThreadNo(L4_Myself()),L4_ThreadNo(rpc_threadId));
+    //Send message to rpc thread and wait to check if read access is allowed
     tag = L4_Call(rpc_threadId);
-    //printf("Here now\n");
+
     L4_MsgStore(tag, &msg);
     L4_Word_t result = L4_MsgWord(&msg, 0);
-    //printf("Opened file with return code %d\n", (int)tmp);
+
+    //Bail if read access is not allowed
     if (result == SOS_READ_INVALID_TOKEN) return -1;
     
+    //Read access is allowed so wait for each byte
     int i;
     for (i = 0; i < nbyte; i++)
     {
-      //printf("waiting for byte number %d\n", i);
-      //L4_Accept(L4_UntypedWordsAcceptor);
+
         tag = L4_Receive(root_threadId);
-	//printf("Baz");
+
         L4_MsgStore(tag, &msg);
-	//printf("Received character %c\n",buf[i]);
+
+	//If there is a tag received then end of file read
         if (L4_Label(tag) > 0 ) break;
         assert(tag.X.u == 1);
         L4_Word_t word = L4_MsgWord(&msg, 0);
         buf[i] = ((char*) &word)[0];
 
-        //buf[i] = (char) word;
-        //printf("the word %lx characters are '%c' '%c' '%c' '%c' \n", tmp, ((char*) &tmp)[0], ((char*) &tmp)[1], ((char*) &tmp)[2], ((char*) &tmp)[3]);
-        //printf("got character '%c', word: %lx\n", buf[i], word);
+	//If a newline character is encountered then end of console read
         if (buf[i] == '\n')
         {
             i++;
             break;
         }
     }
-    //printf("i: %d buffer: %s\n", i, buf);
-    //printf("Am here");
-    long end = time_stamp();
-    if (0 && (result != SOS_READ_CONSOLE)) printf("Time for reading %d bytes is %ld\n",i,(end-start));
     return i;
 }
 
+/*
+ * Client side implementation of the write system call
+ */
 int write(fildes_t file, const char *buf, size_t nbyte)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
         sos_init();
     }
-    long start = time_stamp();
     L4_Msg_t msg;
     L4_MsgTag_t tag;
     L4_MsgClear(&msg);
@@ -180,12 +190,13 @@ int write(fildes_t file, const char *buf, size_t nbyte)
     L4_MsgLoad(&msg);
 
     L4_Accept(L4_UntypedWordsAcceptor);
-    //printf("Here then %lx %lx\n",L4_ThreadNo(L4_Myself()),L4_ThreadNo(rpc_threadId));
+    //Check permission for write
     tag = L4_Call(rpc_threadId);
-    //printf("Here now\n");
+
     L4_MsgStore(tag, &msg);
     L4_Word_t result = L4_MsgWord(&msg, 0);
-    //printf("Opened file with return code %d\n", (int)tmp);
+
+    //Bail out if there are no write perms
     if (result == SOS_WRITE_INVALID_TOKEN) return -1;
     int sent = 0;
     if(result == SOS_WRITE_CONSOLE) {
@@ -193,11 +204,13 @@ int write(fildes_t file, const char *buf, size_t nbyte)
     } else {
         sent = send_message_with_info((L4_Word_t) file, rpc_threadId, SOS_RPC_WRITE, buf, nbyte,root_threadId);
     }
-    long end = time_stamp();
-    if(0) printf("Time take to write %d bytes is %ld",sent,(end-start));
     return sent;
 }
 
+/*
+ * Client side implementation of the get directory entries which finds the files in a specific
+ * directory (We have a flat directory hierarchy)
+ */
 int getdirent(int pos, char *name, size_t nbyte)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -233,25 +246,23 @@ int getdirent(int pos, char *name, size_t nbyte)
         L4_MsgGet(&msg, (L4_Word_t*)buf);
 
         file_name_size = strlen(buf);
-        //printf("seems to be a valid file. filename size: %d, words: %d, word0: %lx string: %s\n", file_name_size, tag.X.u, L4_MsgWord(&msg, 0), buf);
-
         int i;
         for (i = 0; i < nbyte && i < file_name_size; i++)
         {
             name[i] = buf[i];
         }
-        //printf("getdirent returning with message '%s'\n", name);
         return i;
     } else if (result == GETDIRENT_FIRST_EMPTY_FILE)
     {
-        //printf("is the first file afterwards.\n");
         return 0;
-    } else { // GETDIRENT_OUT_OF_RANGE
-        //printf("is way out of range.\n");
+    } else { 
         return -1;
     }
 }
 
+/*
+ * Client side implementation of the file stat which returns the file information
+ */
 int stat(const char *path, stat_t *buf)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -273,6 +284,9 @@ int stat(const char *path, stat_t *buf)
     return 0;
 }
 
+/*
+ * Client side implementation of process create
+ */
 pid_t process_create(const char *path)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -291,6 +305,9 @@ pid_t process_create(const char *path)
     return process_id;
 }
 
+/*
+ * Client side implementation of process delete 
+ */
 int process_delete(pid_t pid)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -311,6 +328,9 @@ int process_delete(pid_t pid)
     return returnval;
 }
 
+/*
+ * Client side implementation of my_id to find the process id of a thread
+ */
 pid_t my_id(void)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -328,6 +348,10 @@ pid_t my_id(void)
     return returnval;
 }
 
+/*
+ * Client side implementation of the process status system call which lists the processes 
+ * created and their status values. Ctime is not implemented
+ */
 int process_status(process_t *processes, unsigned max)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -342,6 +366,8 @@ int process_status(process_t *processes, unsigned max)
     L4_Send(rpc_threadId);
     int counter = 0, breakloop = 0;
     char command_val[N_NAME];
+    //Each message received corresponds to a single process data and the client
+    //replies back after each process entry to make it synchronous
     while(1) {
         if (breakloop || counter == max) 
 	    break;
@@ -369,6 +395,10 @@ int process_status(process_t *processes, unsigned max)
   return counter;
 }
 
+/*
+ * Client side implementation of the process wait system where the client blocks until the
+ * process it is waiting for exits or any process exits for pid -1
+ */
 pid_t process_wait(pid_t pid)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -389,6 +419,9 @@ pid_t process_wait(pid_t pid)
     return returnval;
 }
 
+/*
+ * Client side implementation of the time stamp system call
+ */
 long time_stamp(void)
 {
     while(L4_ThreadNo(rpc_threadId) == L4_ThreadNo(L4_nilthread)) {
@@ -402,19 +435,20 @@ long time_stamp(void)
     L4_Accept(L4_UntypedWordsAcceptor);
     tag = L4_Call(rpc_threadId);
     if (L4_IpcFailed(tag)) {
-      //printf("error in gettimestamp IPC\n");
         return -1;
     }
     L4_MsgStore(tag, &msg);
     long timeval = (uint64_t) L4_MsgWord(&msg,0)*TIME_SPLIT + (uint64_t) L4_MsgWord(&msg,1);
-    //printf("Time is %llu \n",timeval);
     return timeval;
 }
 
-//Need a kernel to sleep until block
+/*
+ * Client side of the sleep system call. The thread sleeps until the sleep time expires if
+ * sleep registration was successful
+ */
 void sleep(int msec)
 {
-    // TODO: blocks forever for now
+    //Send a message to be registered in the sleep queue
     L4_Msg_t msg;
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SOS_RPC_SLEEP));
@@ -425,6 +459,7 @@ void sleep(int msec)
     tag = L4_Call(rpc_threadId);
     L4_MsgStore(tag,&msg);
     int sleep_registered = (int) L4_MsgWord(&msg,0);
+    //If sleep registration was successful wait to be woken up by the root thread
     if(!sleep_registered) {
       //Successfully registered we need to wait
       L4_Receive(root_threadId);

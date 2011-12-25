@@ -223,14 +223,17 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
 	else
 	  errorFlag = 0;
 	if(!errorFlag) {
-	  L4_KDB_Enter("Foo bam");
+	  //L4_KDB_Enter("Foo bam");
 	  //Activate the tid and we are done
 	  dprintf(0,"Activating thread\n");
 	  dprintf(0,"%lx %lx\n",L4_Myself().raw,L4_Pager().raw);
 	  L4_ThreadId_t new_tid_val = sos_thread_activate(newtid,L4_Myself(),(void *) entry_point,(void *)stack_address);
 	  dprintf(0,"Here ?");
-	  process_table_add_creation_entry(token_val -> process_table_index,newtid,1);
 	  dprintf(0,"tid value is %lx\n",new_tid_val.raw);
+	  if(new_tid_val.raw < 0)
+	    errorFlag = 1;
+	  else 
+	    process_table_add_creation_entry(token_val -> process_table_index,newtid,1);
 	}
       }
       completedFlag = 1;

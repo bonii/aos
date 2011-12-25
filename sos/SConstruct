@@ -1,6 +1,6 @@
 Import("*")
 
-srclist = "main.c frames.c libsos.c pager.c timer.c network.c sos_rpc.c sos_rpc_callbacks.c"
+srclist = "main.c frames.c libsos.c pager.c timer.c network.c sos_rpc.c sos_rpc_callbacks.c helpers.c"
 liblist = "l4 c ixp_osal ixp400_xscale_sw lwip nfs serial clock elf"
 
 obj = env.KengeProgram("sos", source = Split(srclist), LIBS = Split(liblist))

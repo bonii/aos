@@ -10,44 +10,52 @@ extern void initialise_swap_callback(uintptr_t token,int status,struct cookie *f
 extern void pager_write_callback(uintptr_t token,int status, fattr_t *attr);
 extern void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_read,char *data);
 extern void unmap_process(L4_ThreadId_t tid_killed);
-//extern int load_code_segment(char *elfFile,L4_ThreadId_t new_tid);
 extern int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid);
+
 #define PTE_SENTINEL -1
 #define UNDEFINED_MEMORY -1
 #define VIRTUAL(addr) (addr >= 0x2000000)
 #define MAX_SWAP_ENTRIES 1000
 #define MAXI 10000
 
+/*
+ * Datastructure containing page table entries
+ */
 typedef struct {
-    L4_ThreadId_t tid;
-    L4_Fpage_t pageNo;
-    unsigned referenced : 1;
-    unsigned dirty : 1;
-    int write_bytes_transferred;
-    int read_bytes_transferred;
-    unsigned being_updated : 1;
-    unsigned error_in_transfer : 1;
-    unsigned pinned : 1;
-  //int pr_next; //It points to the next accessed entry 
+  L4_ThreadId_t tid; 
+  L4_Fpage_t pageNo; //page number of the virtual address
+  unsigned referenced : 1; //reference bit for second chance page replacement algorithm
+  unsigned dirty : 1; //dirty bit designating if the page was written to since last swap
+  int write_bytes_transferred; //size of data transferred to swapfile
+  int read_bytes_transferred; //size of data read in from swapfile
+  unsigned being_updated : 1; //bit to designate if a page table entry is being updated
+  unsigned error_in_transfer : 1; //bit to designate if there was an error in swapin/swapout
+  unsigned pinned : 1; //pin a page to the page table to prevent eviction(code segment)
 } sos_PTE;
 
+/*
+ * Datastructure to contain swap table entries
+ */
 typedef struct {
-    L4_ThreadId_t tid;
-    L4_Fpage_t pageNo;
-    int offset;
-    int next_free;
+  L4_ThreadId_t tid;
+  L4_Fpage_t pageNo; //page number of the virtual address
+  int offset; //offset where the page is present in swap file
+  int next_free; //index pointing to the next free entry in swap table which can be used
 } sos_swap;
 
+/*
+ * Datastructure used as token during swap out and swap in
+ */
 struct page_token{
-  L4_ThreadId_t destination_tid;
-  L4_Fpage_t destination_page;
-  L4_ThreadId_t source_tid;
-  L4_Fpage_t source_page;
-  int pageIndex;
-  int swapIndex;
+  L4_ThreadId_t destination_tid; //tid of the process to be mapped
+  L4_Fpage_t destination_page; //virtual page of the process to be mapped
+  L4_ThreadId_t source_tid; //tid of the process to be mapped out
+  L4_Fpage_t source_page; //virtual address of the process to mapped out
+  int pageIndex; //index in the page table to be updated
+  int swapIndex; //index of swap where it is to be mapped out
 
-  int swapIndexToBeReadIn;
-  int chunk_index;
-  unsigned send_reply : 1;
-  unsigned writeToSwapIssued :1;
+  int swapIndexToBeReadIn; //index of swap which is to be mapped in
+  int chunk_index; //index to demarcate the chunk number received in nfs read/write callback
+  unsigned send_reply : 1; //bit to demarcate if a reply is to be sent to pagefaulting thread
+  unsigned writeToSwapIssued :1; //bit to demarcate if there is a swapout prior to a swapin
 } ;

@@ -7,6 +7,7 @@
 
 #include <serial.h>
 #include "sos_rpc_callbacks.h"
+#include "helpers.h"
 #include <clock.h>
 #include <elf/elf.h>
 
@@ -24,33 +25,6 @@ static L4_ThreadId_t any_process_list[MAX_PROCESSES];
 
 
 static char read_buffer[BUFFER_SIZE];
-
-
-static int send_in_one_message(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, int count)
-{
-   	L4_Msg_t msgx;
-	L4_MsgClear(&msgx);
-	L4_Set_MsgLabel(&msgx, MAKETAG_SYSLAB(MsgLabel));
-	for (int i = 0; i < count;) // i incremented in the loop 
-	{
-		L4_Word_t word = 0;
-		// add bytes one by one
-	    char* writeTo = (char*) &word;
-	    for (int k = 0; k < sizeof(L4_Word_t) && i < count; k++)
-	    {
-			*(writeTo++) = data[i++];
-		}
-		L4_MsgAppendWord(&msgx, word);
-
-	}
-	L4_MsgLoad(&msgx);
-	L4_MsgTag_t tagx = L4_Send(receiver);
-	if (L4_IpcFailed(tagx))
-	{
-	    return -1;
-	}
-	return 0;
-}
 
 static int get_empty_token(void)
 {
@@ -781,7 +755,7 @@ static int sos_rpc_process_stat(void) {
 	L4_MsgAppendWord(&msg, i);
 	L4_MsgAppendWord(&msg, process_table[i].size);
 	L4_MsgAppendWord(&msg, process_table[i].stime/1000);
-	L4_MsgAppendWord(&msg, (time_stamp() - process_table[i].stime)/1000);
+	L4_MsgAppendWord(&msg, 0);
 	L4_MsgLoad(&msg);
 	tag = L4_Call(tid);
 	if(L4_IpcFailed(tag)) {

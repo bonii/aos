@@ -356,12 +356,12 @@ L4_ThreadId_t
 sos_thread_activate(L4_ThreadId_t tid,L4_ThreadId_t pager,void *entrypoint, void *stack) {
     int res = L4_ThreadControl(tid, tid, root_thread_g,
 	    pager, L4_anythread, L4_anythread, (void *) utcb_base_s);
-    dprintf(0,"About here..");
+
     if (!res)
 	return ((L4_ThreadId_t) { raw : -3});
-    L4_KDB_Enter("About here 2..");
+
     L4_Start_SpIp(tid, (L4_Word_t) stack, (L4_Word_t) entrypoint);
-    L4_KDB_Enter("About here 3\n");
+
     return tid;
 }
 
