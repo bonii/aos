@@ -280,7 +280,7 @@ static int isInPage(L4_ThreadId_t tid, L4_Fpage_t fpage)
         if (L4_ThreadNo(page_table[i].tid) == L4_ThreadNo(tid)
             && page_table[i].pageNo.X.b == fpage.X.b)
         {
-            printf("old page found in page at %d (%lx, %d)\n", i, L4_ThreadNo(page_table[i].tid), page_table[i].pageNo.X.b);
+	  //printf("old page found in page at %d (%lx, %d)\n", i, L4_ThreadNo(page_table[i].tid), page_table[i].pageNo.X.b);
             return i;
         }   
   }  
@@ -296,7 +296,7 @@ static int isInSwap(L4_ThreadId_t tid, L4_Fpage_t fpage)
         if (L4_ThreadNo(swap_table[i].tid) == L4_ThreadNo(tid)
             && swap_table[i].pageNo.X.b == fpage.X.b)
         {
-            printf("old page found in swap at %d (%lx, %d)\n", i, L4_ThreadNo(swap_table[i].tid), swap_table[i].pageNo.X.b);
+	  //printf("old page found in swap at %d (%lx, %d)\n", i, L4_ThreadNo(swap_table[i].tid), swap_table[i].pageNo.X.b);
             return i;
         }     
   }
@@ -321,7 +321,7 @@ pager_init(L4_Word_t low, L4_Word_t high)
     numPTE = (high-new_low)/PAGESIZE;
 
     printf("low: %lx new_low: %lx high: %lx numPTE: %d \n", low, new_low, high, numPTE);
-    printf("value of swap memory %p \n",swap_table);
+    //printf("value of swap memory %p \n",swap_table);
     // initialize the empty page table.
     for (int i = 0; i < numPTE; i++)
     {
@@ -581,7 +581,7 @@ pager(L4_ThreadId_t tid, L4_Msg_t *msgP)
     tag = L4_MsgMsgTag(msgP);
     L4_Word_t access_type = L4_Label(tag) & 0x07;
 
-    printf("pager invoked addr=%lx by %lx %lx for access 0x%lx\n", addr,L4_ThreadNo(tid),tid.raw,access_type);
+    //printf("pager invoked addr=%lx by %lx %lx for access 0x%lx\n", addr,L4_ThreadNo(tid),tid.raw,access_type);
 
     // Construct fpage IPC message
     L4_Fpage_t targetFpage = L4_FpageLog2(addr, 12);

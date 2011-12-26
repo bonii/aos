@@ -151,8 +151,8 @@ sos_write(const void *vData, long int position, size_t count, void *handle)
 	size_t i;
 	const char *realdata = vData;
 	// send over serial
-	for (i = 0; i < count; i++)
-		L4_KDB_PrintChar(realdata[i]);
+	/*for (i = 0; i < count; i++)
+	  L4_KDB_PrintChar(realdata[i]);*/
 #if 1
     i = write(console, realdata, count);
 #endif
