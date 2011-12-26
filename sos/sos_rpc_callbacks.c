@@ -1,3 +1,7 @@
+/*
+ * Callback functions for the rpc thread invoked for nfs calls
+ */
+
 #include "sos_rpc_callbacks.h"
 #include "sos_rpc.h"
 #include "l4.h"
@@ -14,6 +18,10 @@ int filename_iterator;
 static L4_Word_t stack_address = 0x7750000;
 filename_t files[MAX_FILES];
 
+/*
+ * Callback function for nfs readdir. It reads directory contents incrementally issuing nfs 
+ * readdirs
+ */
 void nfs_readdir_callback(uintptr_t token, int status, int num_entries, struct nfs_filename* filenames, int next_cookie)
 {
     dprintf(2, "nfs readdir callback\n");
@@ -45,6 +53,9 @@ void nfs_readdir_callback(uintptr_t token, int status, int num_entries, struct n
     }
 }
 
+/*
+ * Callback function for nfs lookup, loads the file attributes if found
+ */
 void nfs_lookup_callback(uintptr_t token, int status, struct cookie* fh, fattr_t* attr)
 {
     dprintf(2, "nfs lookup callback\n");
@@ -55,13 +66,12 @@ void nfs_lookup_callback(uintptr_t token, int status, struct cookie* fh, fattr_t
     dprintf(2, "status is %d\n", status);
     if (status == 0)
     {
+      //Load the attributes if file found
         L4_Word_t st_type = (L4_Word_t) attr->type;
         L4_Word_t st_mode = (L4_Word_t) attr->mode;
         L4_Word_t st_size = (L4_Word_t) attr->size;
         L4_Word_t st_ctime = (L4_Word_t) (attr->ctime.seconds * 1.0e6 + attr->ctime.useconds)/1000;
         L4_Word_t st_atime = (L4_Word_t) (attr->atime.seconds * 1.0e6 + attr->atime.useconds)/1000;
-        //printf("0x%06x 0x%lx 0x%06lx \n",(unsigned int)st_size, st_ctime, st_atime);
-
         L4_MsgAppendWord(&msg, st_type);
         L4_MsgAppendWord(&msg, st_mode);
         L4_MsgAppendWord(&msg, st_size);
@@ -76,6 +86,10 @@ void nfs_lookup_callback(uintptr_t token, int status, struct cookie* fh, fattr_t
     dprintf(2, "nfs_lookup_callback sent.\n");
 }
 
+/*
+ * Callback function to get_file_handle, loads the cookie which is to be used for subsequent
+ * nfs calls
+ */
 void nfs_getcookie_callback(uintptr_t token, int status, struct cookie* fh, fattr_t* attr)
 {
     L4_ThreadId_t tid = (L4_ThreadId_t) token;
@@ -99,6 +113,10 @@ void nfs_getcookie_callback(uintptr_t token, int status, struct cookie* fh, fatt
     L4_Send(tid);
 }
 
+/*
+ * Callback function for nfs read, it replies to the thread waiting for the read bytes character
+ * by character
+ */
 void nfs_read_callback(uintptr_t t, int status, fattr_t *attr, int bytes_read, char *data)
 {
     // send the message back character by character
@@ -127,6 +145,7 @@ void nfs_read_callback(uintptr_t t, int status, fattr_t *attr, int bytes_read, c
         }
         
     } else {
+      //If complete file has been read
       if(status == 0 && bytes_read == 0) {
         status = END_OF_READ_FILE_STATUS;
       }
@@ -139,6 +158,9 @@ void nfs_read_callback(uintptr_t t, int status, fattr_t *attr, int bytes_read, c
     }
 }
 
+/*
+ * Callback function for nfs write 
+ */
 void nfs_write_callback(uintptr_t tokenparam, int status, fattr_t *attr) {
     int token = (int) tokenparam;
     dprintf(2, "nfs write callback with status %d, token %d\n", status, token);
@@ -155,29 +177,35 @@ void nfs_write_callback(uintptr_t tokenparam, int status, fattr_t *attr) {
     L4_Send(tid);
 }
 
+/*
+ * Callback function for process creation elf file lookup
+ */
 void process_create_lookup_callback(uintptr_t token, int status, struct cookie* fh, fattr_t* attr) {
   struct token_process_t *token_val = (struct token_process_t *) token;
   L4_ThreadId_t tidval = token_val -> creating_process_tid;
   int pageindex = token_val -> process_table_index;
-  dprintf(0,"status value is %d tid %lx %d %p",status,tidval.raw,pageindex,token_val);
+  dprintf(2,"status value is %d tid %lx %d %p",status,tidval.raw,pageindex,token_val);
   L4_Msg_t msg;
   int errorFlag = 0;
   if(status != 0) {
     errorFlag = 1;
   }
   if(!errorFlag) {
+    //Allocate elffile memory
     char *elf_file = malloc(attr->size);
     if(elf_file) {
+      //Copy the cookie to be used for nfs read
       struct cookie *filecookie = (struct cookie *) malloc(sizeof(struct cookie));
       memcpy(filecookie , fh, sizeof(struct cookie));
       elf_file[0] = 0;
+      //Load the token
       token_val -> elf_file = elf_file;
       token_val -> data_read = 0;
       token_val -> file_size = attr -> size;
       token_val -> fh = filecookie;
-
+      //read the file
       int val = nfs_read(fh,0,NFS_READ_SIZE,process_create_read_callback,(uintptr_t) token_val);
-      dprintf(0,"Issued nfs read with %d\n",val);
+      dprintf(2,"Issued nfs read with %d\n",val);
     } else {
       errorFlag = 1;
     }
@@ -192,32 +220,37 @@ void process_create_lookup_callback(uintptr_t token, int status, struct cookie* 
   }
 }
 
+/*
+ * Callback function for process create nfs read of the elf file
+ */
 void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, int bytes_read, char *data) {
-  //dprintf(0,"Received process_create read callback with status %d\n",status);
   int errorFlag = 0,completedFlag=0;
   L4_Msg_t msg;
   struct token_process_t *token_val = (struct token_process_t *) token;
   if(status == 0) {
+    //Copy the data read to the elf file
     memcpy(token_val -> elf_file + token_val -> data_read,data,bytes_read);
     token_val -> data_read += bytes_read;
-    //L4_KDB_Enter("blu");
-    //dprintf(0,"Data read %d size %d\n",token_val -> data_read,token_val -> file_size);
+
+    //Check if the file has been read else issue the next read
     if(token_val -> data_read < token_val -> file_size) {
       nfs_read(token_val -> fh,token_val -> data_read,NFS_READ_SIZE,process_create_read_callback,token);
     } else {
-      token_val -> elf_file [token_val -> file_size] = 0;
+      //Finished reading the file successfully
+      token_val -> elf_file [token_val -> file_size] = 0; //Null terminate the file just in case
       int checkFailed =  elf_checkFile((void *)token_val -> elf_file);
-      dprintf(0,"Finished process_create read callbacks %d\n",checkFailed);
+      dprintf(2,"Finished process_create read callbacks %d\n",checkFailed);
       //We have read the file into elf_file now we need to check the elf format
       if(checkFailed != 0) {
 	errorFlag = 1;
       } else {
 	L4_Word_t entry_point = (L4_Word_t) elf_getEntryPoint((void *)token_val -> elf_file);
-	dprintf(0,"We are here %lx\n",entry_point);
+	//Create a new task but do not activate it
 	L4_ThreadId_t newtid = sos_thread_create(token_val -> process_table_index + 5);
-	dprintf(0,"New tid val is %lx\n",newtid.raw);
+	//load the code segment(entire elf file) into the page frames
+	//If there is not enough space in the frame table then do not load the process
 	errorFlag = load_code_segment_virtual(token_val -> elf_file,newtid);
-	dprintf(0,"Are we here ?");
+
 	if(errorFlag < 0) {
 	  errorFlag = 1;
 	  //We need to delete the task so that it does not hang around
@@ -226,17 +259,14 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
 	  errorFlag = 0;
 	}
 	if(!errorFlag) {
-	  //L4_KDB_Enter("Foo bam");
-	  //Activate the tid and we are done
-	  dprintf(0,"Activating thread\n");
-	  dprintf(0,"%lx %lx\n",L4_Myself().raw,L4_Pager().raw);
+	  dprintf(2,"Activating thread\n");
 	  L4_ThreadId_t new_tid_val = sos_thread_activate(newtid,L4_Myself(),(void *) entry_point,(void *)stack_address);
-	  dprintf(0,"Here ?");
-	  dprintf(0,"tid value is %lx\n",new_tid_val.raw);
 	  if(new_tid_val.raw < 0)
 	    errorFlag = 1;
-	  else 
+	  else {
+	    //Fill out the process table with the tid and the creation time
 	    process_table_add_creation_entry(token_val -> process_table_index,newtid,1);
+	  }
 	}
       }
       completedFlag = 1;
@@ -248,17 +278,20 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
   //We dont send a message unless we have an error in one of the callbacks or we finished 
   //processing the last callback
   if(!errorFlag && !completedFlag) {
+    //There are more nfs reads callbacks to be handled
     return;
   }
   L4_MsgClear(&msg);
   if(errorFlag) {
     L4_MsgAppendWord(&msg, -1);
+    //Undo the process table entry which was filled with root process tid to free it
     process_table_add_creation_entry(token_val -> process_table_index,L4_nilthread,0);
   } else {
     L4_MsgAppendWord(&msg, token_val -> process_table_index);
   }
   L4_MsgLoad(&msg);
   L4_Send(token_val -> creating_process_tid);
+  //Free the malloced memory
   free(token_val -> elf_file);
   free(token_val -> fh);
   free(token_val);
