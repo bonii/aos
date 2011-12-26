@@ -324,8 +324,10 @@ static int sos_rpc_get_token(void)
 	    int index_val = get_pid_from_table(tid);
 	    if(index_val >= 0 && index_val < MAX_PROCESSES) {
 	      for(int i=0;i<MAX_TOKENS;i++) {
-		if(process_table[index_val].token_table[i] == -1)
+		if(process_table[index_val].token_table[i] == -1) {
 		  process_table[index_val].token_table[i] = token;
+		  break;
+		}
 	      }
 	    }
 	    
