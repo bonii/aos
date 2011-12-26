@@ -49,11 +49,9 @@ init_thread(void)
 {
     // Initialise the network for libsos_logf_init
     network_init();
-    printf("Initialising swap ...");
     //Initialise swap which creates the swap file if it is not present and needs to be done
     //after network init
     initialise_swap();
-    printf("Initialised swap");
     // Loop through the BootInfo starting executables
     int i;
     L4_Word_t task = 0;

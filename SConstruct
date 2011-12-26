@@ -77,11 +77,11 @@ sosh = app_env1.Application("sosh")
 bootimg = env.Bootimage(l4kernel, sos,sosh)
 
 filesystem_apps=[]
-#filesystem_apps.append(app_env.Application("sosh"))
+filesystem_apps.append(app_env.Application("sosh"))
 filesystem_apps.append(app_env.Application("hi"))
 filesystem_apps.append(app_env.Application("test1"))
 filesystem_apps.append(app_env.Application("test2"))
-appnames = ["hi","test1","test2"]
+appnames = ["sosh","hi","test1","test2"]
 
 for x in appnames:
    shutil.copyfile("./build/userland/%s/%s" % (x,x),"%s/%s" %
