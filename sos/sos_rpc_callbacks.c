@@ -218,10 +218,13 @@ void process_create_read_callback(uintptr_t token, int status, fattr_t *attr, in
 	dprintf(0,"New tid val is %lx\n",newtid.raw);
 	errorFlag = load_code_segment_virtual(token_val -> elf_file,newtid);
 	dprintf(0,"Are we here ?");
-	if(errorFlag < 0)
+	if(errorFlag < 0) {
 	  errorFlag = 1;
-	else
+	  //We need to delete the task so that it does not hang around
+	  sos_delete_task(newtid,L4_Myself());
+	} else {
 	  errorFlag = 0;
+	}
 	if(!errorFlag) {
 	  //L4_KDB_Enter("Foo bam");
 	  //Activate the tid and we are done

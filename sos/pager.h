@@ -2,14 +2,54 @@
 #include <l4/message.h>
 #include "network.h"
 
+/*
+ * Function invoked by roottask on pagefault
+ */
 extern int pager(L4_ThreadId_t tid, L4_Msg_t *msg);
+
+/*
+ * Init function to initialise the page table entries
+ */
 extern L4_Word_t pager_init(L4_Word_t low, L4_Word_t high);
+
+/*
+ * Function to unmap all entries from the page table(used for milestone 2)
+ */
 extern void unmap_all(void);
+
+/*
+ * Function to initialise swapfile, create it if not present
+ */
 extern void initialise_swap(void);
+
+/*
+ * Swap creation callback function, received after swapfile lookup
+ */
 extern void initialise_swap_callback(uintptr_t token,int status,struct cookie *fh,fattr_t *attr);
+
+/*
+ * Callback function for nfs_write to swapfile, Issues a read from swap if necessary
+ * Replies to the thread if only swapout need to be done and no swapin
+ */
 extern void pager_write_callback(uintptr_t token,int status, fattr_t *attr);
+
+/*
+ * Callback function to nfs_read from swapfile
+ * Always replies to the thread
+ */
 extern void pager_read_callback(uintptr_t token,int status, fattr_t *attr, int bytes_read,char *data);
+
+/*
+ * Unmaps all the page table entries and pages and frees the frames for a tid
+ */
+
 extern void unmap_process(L4_ThreadId_t tid_killed);
+
+/*
+ * This function loads the entire elf file into the phsical frames and
+ * maps fpages corresponding to virtual address in elf file to the process
+ * Return -1 if the code could not be loaded
+ */
 extern int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid);
 
 #define PTE_SENTINEL -1
@@ -17,7 +57,7 @@ extern int load_code_segment_virtual(char *elfFile,L4_ThreadId_t new_tid);
 #define VIRTUAL(addr) (addr >= 0x2000000)
 #define MAX_SWAP_ENTRIES 1000
 #define MAXI 10000
-
+#define BASE_CODE_SEGMENT_ADDRESS 0x10000000
 /*
  * Datastructure containing page table entries
  */

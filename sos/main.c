@@ -201,6 +201,7 @@ main (void)
 	dprintf(0, "initializing frame manager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
 
     frame_init(low + HEAP_SIZE, high);
+
     dprintf(0, "initializing pager from 0x%08lx to 0x%08lx...\n", low + HEAP_SIZE, high);
     L4_Word_t new_low = pager_init((low + HEAP_SIZE), high);
     set_new_low(new_low);
