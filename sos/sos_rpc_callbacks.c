@@ -187,7 +187,7 @@ void process_create_lookup_callback(uintptr_t token, int status, struct cookie* 
   dprintf(2,"status value is %d tid %lx %d %p",status,tidval.raw,pageindex,token_val);
   L4_Msg_t msg;
   int errorFlag = 0;
-  if(status != 0) {
+  if(status != 0 || !(attr -> mode & FM_EXEC)) {
     errorFlag = 1;
   }
   if(!errorFlag) {
