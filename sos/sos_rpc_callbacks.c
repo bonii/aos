@@ -212,6 +212,8 @@ void process_create_lookup_callback(uintptr_t token, int status, struct cookie* 
   }
 
   if(errorFlag) {
+    //Undo the process table entry which was filled with root process tid to free it
+    process_table_add_creation_entry(token_val -> process_table_index,L4_nilthread,0);
     L4_MsgClear(&msg);
     L4_MsgAppendWord(&msg,-1);
     L4_MsgLoad(&msg);
