@@ -1,3 +1,6 @@
+/*
+ * RPC thread handler. All system call messages are directed first to this handler
+ */
 #include "sos_rpc.h"
 
 #include <stdio.h>
@@ -26,32 +29,43 @@ static L4_ThreadId_t any_process_list[MAX_PROCESSES];
 
 static char read_buffer[BUFFER_SIZE];
 
+/*
+ * Internal function to get index of token table which is free
+ */
 static int get_empty_token(void)
 {
-    int i;
-    for (i = 0; i < MAX_TOKENS; i++)
+  int i;
+  for (i = 0; i < MAX_TOKENS; i++)
     {
-        if (token_table[i].read_count == 0 && token_table[i].write_count == 0)
-        {
-            break;
+      //If token table read and write counts are 0 then it is free
+      if (token_table[i].read_count == 0 && token_table[i].write_count == 0)
+	{
+	  break;
         }
     }
-    return i;
+  return i;
 }
 
+/*
+ * Internal function to get index of the process table which is free
+ */
 static int get_empty_pid(void)
 {
-    int i;
-    for (i = 0; i < MAX_PROCESSES; i++)
+  int i;
+  for (i = 0; i < MAX_PROCESSES; i++)
     {
       if (L4_ThreadNo(process_table[i].tid) == L4_ThreadNo(L4_nilthread))
         {
             break;
         }
     }
-    return i;
+  return i;
 }
 
+/*
+ * Internal function to search a tid in process table
+ * Pid of a process is the index in the process table where it is stored
+ */
 static int get_pid_from_table(L4_ThreadId_t tid_search) {
     int i;
     for (i = 0; i < MAX_PROCESSES; i++)
@@ -64,6 +78,10 @@ static int get_pid_from_table(L4_ThreadId_t tid_search) {
     return i;
 }
 
+/*
+ * Internal function to update the size the process occupies in memory in page
+ * Invoked by the pager on swapin/swapout/frame allocation
+ */
 void update_process_table_size(L4_ThreadId_t tid_of_page,unsigned increase) {
   int index = get_pid_from_table(tid_of_page);
   if(index >= 0 && index < MAX_PROCESSES) {
@@ -72,7 +90,7 @@ void update_process_table_size(L4_ThreadId_t tid_of_page,unsigned increase) {
     } else {
       process_table[index].size -= 1;
     }
-    dprintf(0,"Process table size of pid %lx is %d",process_table[index].tid.raw,process_table[index].size);
+    dprintf(2,"Process table size of pid %lx is %d",process_table[index].tid.raw,process_table[index].size);
   }
   
 }
@@ -86,12 +104,21 @@ static int get_access_index_from_token (int token)
     return token % MAX_ACCESSES;
 }
 
+/*
+ * A token value is made of the index in the token table and also index in the access list
+ * present at that token table entry
+ * Function retrieves the access datastructure from the token
+ */
 Token_Access_t* get_access_from_token(int token) {
     int index = get_index_from_token(token);
     Token_Descriptor_t* desc = &(token_table[index]);
     return &(desc->accesses[get_access_index_from_token(token)]);
 }
 
+/*
+ * Callback function of serial send, sends character by character to the threads waiting
+ * for a console read
+ */
 static void get_serial_port_input(struct serial * serial_port,char input) {
     dprintf(2, "got input token %c\n", input);
     char temp[2];
@@ -125,7 +152,6 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
 	   && console_listeners[j].number_bytes_left > 0 
 	   && console_listeners[j].read_enabled) {
 
-	  //L4_MsgTag_t tag;
 	        L4_Msg_t msg1;
 		L4_MsgClear(&msg1);
 		L4_Set_MsgMsgTag(&msg1, L4_Niltag);
@@ -146,7 +172,7 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
 	}
       }
     }
-      //Flush the buffer
+    //Flush the buffer
     int counter = 0;
     for(i=buffer_index_flushed;i<BUFFER_SIZE && i!= -1;i++,counter++) {
       read_buffer[counter] = read_buffer[buffer_index_flushed+counter+1];
@@ -158,6 +184,9 @@ static void get_serial_port_input(struct serial * serial_port,char input) {
     BUFFER_LOCK = 0;
 }
 
+/*
+ * Internal helper function to handle filename lookups to retrieve cookies
+ */
 static int get_file_handle(char* filename, struct cookie* writeTo, int* size)
 {
     nfs_lookup(&mnt_point, filename, nfs_getcookie_callback, (uintptr_t) L4_Myself().raw);
@@ -172,19 +201,22 @@ static int get_file_handle(char* filename, struct cookie* writeTo, int* size)
     {
         ((L4_Word_t*)writeTo)[i] = L4_MsgWord(&new_msg, i+1);
     }
-
-    dprintf(0, "\n");
+    dprintf(2, "\n");
     return status;
 }
 
+/*
+ * Server end function to handle client open system call. Sets up the token table entries
+ * and access permissions to tokens for different threads
+ */
 static int sos_rpc_get_token(void)
 {
-    dprintf(0, "SOS_RPC_GET_TOKEN called.\n");
+    dprintf(2, "SOS_RPC_GET_TOKEN called.\n");
+    //File name and mode are packed in one message
     assert(tag.X.u == FILE_NAME_WORDS + 1);
     char tokenData[FILE_NAME_MODE_SIZE];
     L4_MsgGet(&msg, (L4_Word_t*)tokenData);
     fmode_t mode = (fmode_t) tokenData[FILE_NAME_SIZE];
-    //for (int i = 0; i < FILE_NAME_MODE_SIZE; i++ ) dprintf(0, "%c ", tokenData[i]);
     char* filename = (char*) tokenData;
 
     dprintf(2, "filename: %s\n", filename);
@@ -216,6 +248,7 @@ static int sos_rpc_get_token(void)
     int token = 0;
     if (found < 0)
     {
+      //First open call for a resource
         found = get_empty_token();
 
         if (found >= MAX_TOKENS)
@@ -317,7 +350,7 @@ static int sos_rpc_get_token(void)
             sattr_t attributes;
             attributes.mode = mode;
             attributes.size = 0;
-            // we need to create the file
+            // we need to create the file as per the specs of fs api
             nfs_create(&mnt_point, filename, &attributes, nfs_getcookie_callback, (uintptr_t) L4_Myself().raw);
             // go to sleep
             L4_Msg_t new_msg;
@@ -327,6 +360,8 @@ static int sos_rpc_get_token(void)
             L4_MsgStore(new_tag, &new_msg);
             L4_MsgGet(&new_msg, (L4_Word_t*) &fh);
         } else {
+	  //Set the write offset to the size of the file at the time of opening so self write
+          //will append to the file
             access->write_offset = size;
 	    access->max_read_offset = size;
 	}
@@ -343,12 +378,18 @@ static int sos_rpc_get_token(void)
     return 1;
 }
 
+/*
+ * Helper function to check if a tid has access to a resource it is claiming
+ */
 static char has_access(L4_ThreadId_t tid, int token, fmode_t mode)
 {
     Token_Access_t* access = get_access_from_token(token);
     return (access->tid.raw == tid.raw || ((access->mode|mode) != 0));
 }
 
+/*
+ * Server end function to handle client write calls
+ */
 static int sos_rpc_write(void)
 {
     L4_Word_t realdata[WORDS_SENT_PER_IPC];
@@ -356,7 +397,7 @@ static int sos_rpc_write(void)
     // first word is the file descriptor token
     int token = realdata[0];
     int token_index = get_index_from_token(token);
-    //dprintf(0, "writing to token %ld\n", token);
+    dprintf(2, "writing to token %ld\n", token);
     // find if the file is correctly opened for writing
     Token_Descriptor_t* file = &token_table[token_index];
     Token_Access_t* access = get_access_from_token(token); 
@@ -366,15 +407,12 @@ static int sos_rpc_write(void)
     {
         dprintf(2, "file %s is not opened for writing by %ld\n", file->filename, L4_ThreadNo(tid));
     } else {
-    //dprintf(0, "payload is \n---\n%s\n---\n", (char*)(&realdata[1]));
+      dprintf(2, "payload is \n---\n%s\n---\n", (char*)(&realdata[1]));
         char* filename = token_table[token_index].filename;
         char console = (strcmp(filename, "console") == 0);
         int bytes_without_length_info = (int)realdata[tag.X.u-1];
         if (console)
         {
-            //dprintf(0, "writing to console: '%s'\n", (char*)(&realdata[1]));
-            // try to send count bytes
-            //dprintf(0, "%lx", serial_port);
             if(serial_port == 0) serial_port = serial_init();
             bytes_sent = serial_send(serial_port, (char*)(&realdata[1]), bytes_without_length_info);
             if (bytes_sent < bytes_without_length_info)
@@ -384,13 +422,13 @@ static int sos_rpc_write(void)
             //send = 1;
         } else {
             dprintf(2, "not writing to console...\n");
-            // TODO: Write to a file (not yet implemented)
             //We need to get the file handle
             struct cookie fh;
 	    int size;
             get_file_handle(token_table[token_index].filename, &fh, &size);
             nfs_write(&fh, access->write_offset, bytes_without_length_info,(char *)(&realdata[1]), nfs_write_callback, (uintptr_t) token);
             dprintf(2,"After nfs write");
+	    //The callback will reply
             send = 0;
         }
     }
@@ -404,18 +442,23 @@ static int sos_rpc_write(void)
     return (send);
 }
 
+/*
+ * Helper function to clear token table entries for a token access by a thread on close call
+ * Also clears the list of listeners for console read if console token is closed
+ */
 static int close_file_descriptor(int token) {
     int index = get_index_from_token(token);
     int found = -1;
     int access_index = get_access_index_from_token(token);
     Token_Access_t* access = get_access_from_token(token);
-    //If it is a console reader deregister it
     dprintf(2,"IReplying to tid %lx",L4_ThreadNo(tid));
-    while(BUFFER_LOCK) {
-      ;
-    }
-    BUFFER_LOCK = 1;
+    //If it is a console reader deregister it
     if(strcmp(token_table[index].filename,"console") == 0) {
+      while(BUFFER_LOCK) {
+	;
+      }
+      BUFFER_LOCK = 1;
+      
       for(int i=0;i<MAX_CONSOLE_READERS;i++) {
         if(L4_ThreadNo(console_listeners[i].tid) == L4_ThreadNo(access->tid)) {
           console_listeners[i].tid = L4_nilthread;
@@ -423,9 +466,11 @@ static int close_file_descriptor(int token) {
           console_listeners[i].number_bytes_left = 0;
         }
       }
+      BUFFER_LOCK = 0;
     }
     dprintf(2,"IReplying to tid %lx",L4_ThreadNo(tid));
-    BUFFER_LOCK = 0;
+    
+    //Clear the token table for the thread which closes it
     if(access_index < MAX_ACCESSES && access->tid.raw == tid.raw) {
         found = 0;
         //decrement relevant counters
@@ -443,15 +488,19 @@ static int close_file_descriptor(int token) {
     return found;
 }
 
+/*
+ * Server end function corresponding to the client close system call
+ */
 static int sos_rpc_release_token(void)
 {
     dprintf(2,"Release token received");
     int token = (int) L4_MsgWord(&msg,0);
     //Get the token number from the message which is my index into the datastructure
     //Construct the message and send the found value
+    //Release it from token table
     int found = close_file_descriptor(token);
     int index_val = get_pid_from_table(tid);
-    //Release it from token table
+    //Remove entries for this token for this tid from the process table
     if(index_val >= 0 && index_val < MAX_PROCESSES) {
       for(int i=0;i<MAX_TOKENS;i++) {
 	if(process_table[index_val].token_table[i] == token)
@@ -466,19 +515,22 @@ static int sos_rpc_release_token(void)
     return 1;
 }
 
+/*
+ * Server end function to check if necessary write perms are present for the client to 
+ * send the data for writing
+ */
 static int sos_rpc_write_perms(void) {
-    //dprintf(0, "got sos_rpc_write_perms call\n");
     // Extract actual message
     // first word is the file descriptor token
     int token = L4_MsgWord(&msg, 0);
     int index = get_index_from_token(token);
     L4_Word_t messageWord;
     Token_Descriptor_t* file = &token_table[index];
-    //dprintf(0, "writing to token %ld\n", token);
+    dprintf(2, "writing to token %ld\n", token);
     // find if the file is correctly opened for writing
     if (!has_access(tid, token, FM_WRITE))
     {
-        dprintf(0, "file %s is not opened for writing by %ld\n", file->filename, L4_ThreadNo(tid));
+        dprintf(2, "file %s is not opened for writing by %ld\n", file->filename, L4_ThreadNo(tid));
         messageWord = SOS_WRITE_INVALID_TOKEN;
     }
 
@@ -496,19 +548,23 @@ static int sos_rpc_write_perms(void) {
     return 1;
     }
 
+/*
+ * Server end function for read system call
+ */
 static int sos_rpc_read(void)
 {
-  //dprintf(0, "Read token received\n");
+    dprintf(2, "Read token received\n");
     int token = (int) L4_MsgWord(&msg,0);
     int index = get_index_from_token(token);
     Token_Access_t* access_threads = get_access_from_token(token);
     int bytes = (int) L4_MsgWord(&msg,1);
-    //dprintf(0,"Token is %d Index is %d: bytes are %d \n", token, index, bytes);
+    dprintf(2,"Token is %d Index is %d: bytes are %d \n", token, index, bytes);
     char access = has_access(tid, token, FM_READ);
     L4_Word_t messageWord;
+    //Check if the thread has access
     if (!access)
     {
-      //dprintf(0, "no access for reading\n");
+        dprintf(2, "no access for reading\n");
         messageWord = SOS_READ_INVALID_TOKEN;
     } else if (strcmp(token_table[index].filename, "console") == 0)
     {
@@ -527,6 +583,7 @@ static int sos_rpc_read(void)
             //Now we need to check for the handler
             //Now we need to block and flush buffer
 	    //Register it for messages
+	    //And then the interrupt handler will send messages
 	    while(BUFFER_LOCK) {
 	        ;
 	    }
@@ -539,10 +596,8 @@ static int sos_rpc_read(void)
 	      }
 	    }
 	    BUFFER_LOCK = 0;
-	      //blocking_send_buffered_input(tid,bytes);
         } else {
             // delegate this to nfs_read
-            // TODO: position
             struct cookie fh; int size;
             assert(get_file_handle(token_table[index].filename, &fh, &size) == 0);
             int bytes_to_read = (access_threads->read_offset + bytes <= access_threads->max_read_offset) ? 
@@ -552,10 +607,12 @@ static int sos_rpc_read(void)
         }
     }
 
-    //dprintf(0, "Sending back found=%d\n", found);
     return 0;
 }
 
+/*
+ * Server end function for the stat system, does a nfs lookup to get the file attributes
+ */
 static int sos_rpc_stat(void)
 {
     // get the filename
@@ -565,13 +622,16 @@ static int sos_rpc_stat(void)
     return 0;
 }
 
+/*
+ * Server end function for getdirent system call
+ */
 static int sos_rpc_getdirent(void)
 {
     // get the position
     int pos = (int) L4_MsgWord(&msg, 0);
     // reset the filename iterator
     filename_iterator = 0;
-    //dprintf(0, "getdirent issuing readdir\n");
+    //Issue the readdir
     nfs_readdir(&mnt_point, 0, FILE_NAME_SIZE, nfs_readdir_callback, (uintptr_t) L4_Myself().raw);
     // go to sleep
     L4_ThreadId_t root_threadId = L4_Pager();
@@ -581,57 +641,65 @@ static int sos_rpc_getdirent(void)
     L4_MsgClear(&msg);
     L4_Set_MsgMsgTag(&msg, L4_Niltag);
     if (pos < filename_iterator)
-    {
+      {
+	//files is filled in the callback file, since it blocks for the callback to return
+	//there are no overwrite issues
         char* toSend = files[pos].chars;
         L4_Set_MsgLabel(&msg, GETDIRENT_VALID_FILE);
         int count = strlen(toSend) + 1;
         for (int i = 0; i < count;) // i incremented in the loop 
-	    {
-		    L4_Word_t word = 0;
-		    // add bytes one by one
-	        char* writeTo = (char*) &word;
-	        for (int k = 0; k < sizeof(L4_Word_t) && i < count; k++)
-	        {
-			    *(writeTo++) = toSend[i++];
-		    }
-		    L4_MsgAppendWord(&msg, word);
-	    }
+	  {
+	    L4_Word_t word = 0;
+	    // add bytes one by one
+	    char* writeTo = (char*) &word;
+	    for (int k = 0; k < sizeof(L4_Word_t) && i < count; k++)
+	      {
+		*(writeTo++) = toSend[i++];
+	      }
+	    L4_MsgAppendWord(&msg, word);
+	  }
 
-        //dprintf(0, "reply for getdirent assembled to tid %lx\n", tid.raw);
+        dprintf(2, "reply for getdirent assembled to tid %lx\n", tid.raw);
     } else if (pos == filename_iterator)
     {
-      //dprintf(0, "position %d is the first afterwards\n", pos);
+        dprintf(2, "position %d is the first afterwards\n", pos);
         L4_Set_MsgLabel(&msg, GETDIRENT_FIRST_EMPTY_FILE);
     } else {
-      //dprintf(0, "position %d is way out of range\n", pos);
+        dprintf(2, "position %d is way out of range\n", pos);
         L4_Set_MsgLabel(&msg, GETDIRENT_OUT_OF_RANGE);
     }
     L4_MsgLoad(&msg);
-
     return 1;
 }
 
+/*
+ * Server function for process delete system call
+ */
 static int sos_rpc_process_delete(void) {
     int pid_kill = (int) L4_MsgWord(&msg,0);
-    dprintf(0,"Got a process delete %d %lx by %lx",pid_kill,L4_ThreadNo(tid),L4_Myself().raw);
+    dprintf(2,"Got a process delete %d %lx by %lx",pid_kill,L4_ThreadNo(tid),L4_Myself().raw);
     L4_Msg_t msg1;
     L4_MsgTag_t tag1;
     L4_ThreadId_t tid_kill = L4_nilthread;
     int returnval = -1;
+    //Check if the pid is valid
     if(pid_kill >=0 && pid_kill < MAX_PROCESSES 
        && L4_ThreadNo(process_table[pid_kill].tid) != L4_ThreadNo(L4_nilthread)) {
       //Send message all the 
       tid_kill = process_table[pid_kill].tid;
+      //Delete the process
       int killval = sos_delete_task(tid_kill,L4_Pager());
       returnval = 0;
-      dprintf(0,"Returnval of process kill is %d\n",killval);
-      for(int i=0;i<MAX_TOKENS;i++) {
+      dprintf(2,"Returnval of process kill is %d\n",killval);
+      for(int i=0;i<MAX_TOKENS && killval;i++) {
+	//Close file descriptors if open and remove them from the process table
 	if(process_table[pid_kill].token_table[i] != -1) {
 	  close_file_descriptor(process_table[pid_kill].token_table[i]);
 	  process_table[pid_kill].token_table[i] = -1;
 	}
       }
-      for(int i=0;i<MAX_WAITING_TID;i++) {
+      for(int i=0;i<MAX_WAITING_TID && killval;i++) {
+	//Reply to the tids waiting for this process to exit
 	if(L4_ThreadNo(process_table[pid_kill].waiting_tid[i]) 
 	   != L4_ThreadNo(L4_nilthread)) {
 	  //Send a message to it so that its process_create or process_wait calls can receive
@@ -641,13 +709,13 @@ static int sos_rpc_process_delete(void) {
 	      L4_MsgLoad(&msg1);
 	      tag1 = L4_Reply(process_table[pid_kill].waiting_tid[i]);
 	      if(L4_IpcFailed(tag1)) {
-		dprintf(0,"Failed to reply to waiting tid %lx",process_table[pid_kill].waiting_tid[i]);
+		dprintf(2,"Failed to reply to waiting tid %lx",process_table[pid_kill].waiting_tid[i]);
 	      }
 	      process_table[pid_kill].waiting_tid[i] = L4_nilthread;
 	}
       }
-      //We do not signal returnval failure here
-      for(int i=0;i<MAX_PROCESSES;i++) {
+      //Send a reply waiting for any process to exit
+      for(int i=0;i<MAX_PROCESSES && killval;i++) {
         if(L4_ThreadNo(any_process_list[i]) != L4_ThreadNo(L4_nilthread)) {
        	      L4_MsgClear(&msg1);
 	      L4_Set_MsgMsgTag(&msg1, L4_Niltag);
@@ -664,7 +732,7 @@ static int sos_rpc_process_delete(void) {
       process_table[pid_kill].size = 0;
       process_table[pid_kill].stime = 0;
       strcpy(process_table[pid_kill].command,"");
-	//Now remove the entries from the pagetable for the process
+      //Now remove the entries from the pagetable for the process
       L4_MsgClear(&msg1);
       L4_Set_MsgLabel(&msg1,MAKETAG_SYSLAB(SOS_SYSCALL_REMOVE_TID_PAGE));
       L4_MsgAppendWord(&msg1,tid_kill.raw);
@@ -673,19 +741,22 @@ static int sos_rpc_process_delete(void) {
     }
     //If the process to be killed invoked process_delete on itself we will not reply back
     if(L4_ThreadNo(tid_kill) == L4_ThreadNo(tid)) {
-      dprintf(0,"Not replying back to tid %lx",L4_ThreadNo(tid));
+      dprintf(2,"Not replying back to tid %lx",L4_ThreadNo(tid));
       return 0;
     }
     L4_MsgClear(&msg);
     L4_Set_MsgMsgTag(&msg, L4_Niltag);
     L4_MsgAppendWord(&msg, returnval);
     L4_MsgLoad(&msg);
-    dprintf(0,"Replying to tid %lx",L4_ThreadNo(tid));
+    dprintf(2,"Replying to tid %lx",L4_ThreadNo(tid));
     return 1;
 }
 
+/*
+ * Server end function to find the pid value of a process if it exists in the process table
+ */
 static int sos_rpc_process_id(void) {
-    dprintf(0,"Got token process_id from tid %lx\n",tid);
+    dprintf(2,"Got token process_id from tid %lx\n",tid);
     int i = get_pid_from_table(tid);
     if(i >= MAX_PROCESSES) {
         //It was not found in the process table
@@ -698,9 +769,12 @@ static int sos_rpc_process_id(void) {
     return 1;
 }
 
+/*
+ * Server end function for the process wait function call
+ */
 static int sos_rpc_process_wait(void) {
   int pid = (int) L4_MsgWord(&msg,0);
-  dprintf(0,"Got token process_wait for pid %d",pid);
+  dprintf(2,"Got token process_wait for pid %d",pid);
   int errorFlag = 1;
   int returnval = -1;
   if(pid == -1) {
@@ -713,6 +787,7 @@ static int sos_rpc_process_wait(void) {
       }
     }
   } else {
+    //Add it to the pid of the process it wants to wait for by adding to waiting list
     if(pid >= 0 && pid < MAX_PROCESSES && L4_ThreadNo(process_table[pid].tid) != L4_ThreadNo(L4_nilthread)) {
       for(int i=0;i<MAX_WAITING_TID;i++) {
         if(L4_ThreadNo(process_table[pid].waiting_tid[i]) == L4_ThreadNo(L4_nilthread)) {
@@ -730,22 +805,27 @@ static int sos_rpc_process_wait(void) {
     L4_MsgLoad(&msg);
     return 1;
   }
-  dprintf(0,"Not returning a reply");
+  dprintf(2,"Not returning a reply");
   return 0;
 }
 
-
+/*
+ * Server end function for the process status system call
+ */
 static int sos_rpc_process_stat(void) {
     int max_processes = L4_MsgWord(&msg,0);
     int returnval = 0;
+    //Need to send messages corresponding to the number of processes demanded
     for(int i=0,count=1;i<MAX_PROCESSES && count <= max_processes;i++) {
 
       if(L4_ThreadNo(process_table[i].tid) != L4_ThreadNo(L4_nilthread)) {
 	//We need to send the message
-	//L4_KDB_Enter("hell");
 	count++;
+	//Send the execname in one message as its size can be one message size
 	returnval = send_in_one_message(tid,SEND_STAT_COMMAND,process_table[i].command,strlen(process_table[i].command));
+	//Wait until acknowledgement received in order to make it synchronous
 	tag = L4_Receive(tid);
+	//If receiving process dies bail out
 	if(L4_IpcFailed(tag)) {
 	  return 0;
 	}
@@ -763,14 +843,17 @@ static int sos_rpc_process_stat(void) {
 	}
       }
     }
-    //Now we need to send an end message
+    //Now we need to send an end of stat message
     L4_MsgClear(&msg);
     L4_Set_MsgLabel(&msg,MAKETAG_SYSLAB(SEND_STAT_END));
     L4_MsgLoad(&msg);
-    //L4_KDB_Enter("q");
     return 1;
 }
 
+/*
+ * Helper function to use as a callback to update process table entry after successful process
+ * creation or failure
+ */
 void process_table_add_creation_entry(int index,L4_ThreadId_t newtid,unsigned success) {
   if(success) {
     process_table[index].tid = newtid;
@@ -782,46 +865,57 @@ void process_table_add_creation_entry(int index,L4_ThreadId_t newtid,unsigned su
   }
 }
 
+/*
+ * Server end function to create a process by loading it from elf file from file system
+ * Loads the elf file into the frames and maps virtual address to the frames for the tid
+ * Fails loading if the entire elf file cannot loaded into the frames
+ */
 static int sos_rpc_process_create(void) {
     char execname[FILE_NAME_SIZE];
     L4_MsgGet(&msg, (L4_Word_t *)execname);
     //0 terminate it
     execname[FILE_NAME_SIZE-1]=0;
-    dprintf(0,"Got process create %s\n",execname);
+    dprintf(2,"Got process create %s\n",execname);
     int pid = -1;
     int index = -1;
+    //Get index in the process table to be filled
     index = get_empty_pid();
-    //We want to load something from the file system here
+
+    // Process table full
     if(index >= MAX_PROCESSES) {
           L4_MsgClear(&msg);
 	  L4_MsgAppendWord(&msg, pid);
 	  L4_MsgLoad(&msg);
 	  return 1;
     }
-    //This will prevent this process table entry from being manipulated until the read callbacks are finished
+    //We want to load something from the file system here
+    //This will prevent this process table entry from being used by other process create
+    //as this process table index is marked as taken (L4_nilthread means not taken)
     process_table[index].tid = L4_Myself();
     process_table[index].size = 0;
+    //Clear the token table
     for(int j=0;j<MAX_TOKENS;j++) {
       process_table[index].token_table[j] = -1;
     }
     strcpy(process_table[index].command,execname); 
+    //Clear the waiting process table
     for(int k=0;k<MAX_WAITING_TID;k++) {
       process_table[index].waiting_tid[k] = L4_nilthread;
     }
     struct token_process_t *token_val = (struct token_process_t *) malloc(sizeof(struct token_process_t));
     token_val -> creating_process_tid = tid;
-    dprintf(0,"%lx %lx %p\n",tid.raw,token_val->creating_process_tid.raw,token_val);
     token_val -> process_table_index = index;
-    //The callback will reply then
+    //The callback will reply then and invoke rest of process loading
     nfs_lookup(&mnt_point,execname,process_create_lookup_callback,(uintptr_t) token_val);
     return 0;
 }
 
 
 
-/* This is similar to syscall loop but we want
-to run it as a separate thread in order to handle
-blocking calls */
+/* 
+ * This is similar to syscall loop but we want to run it as a separate thread in order 
+ * to handle blocking calls 
+ */
 void rpc_thread(void)
 {
     dprintf(2, "Entering rpc_loop");
@@ -928,10 +1022,10 @@ void rpc_thread(void)
 	    L4_MsgLoad(&msg);
 	    break;
 	case SOS_RPC_SLEEP:
-            dprintf(0, "sleep message called\n");
+            dprintf(2, "sleep message called\n");
 	    int delay = (int) L4_MsgWord(&msg,0);
 	    L4_Set_MsgMsgTag(&msg, L4_Niltag);
-	    dprintf(0,"Delay is %d\n",delay);
+	    dprintf(2,"Delay is %d\n",delay);
 	    int returnval = register_timer(delay*1000,tid);
   	    L4_MsgAppendWord(&msg, returnval);
 	    L4_MsgLoad(&msg);

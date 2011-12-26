@@ -75,7 +75,10 @@ struct token_process_t {
   struct cookie* fh; //cookie obtained in nfs_lookup of the file and used in nfs_read
 } ;
 
-
+/*
+ * Function to update the size of process memory in pages invoked by the pager
+ * on swapout/swapin/frame allocation
+ */
 extern void update_process_table_size(L4_ThreadId_t tid,unsigned increase);
 extern void process_table_add_creation_entry(int index,L4_ThreadId_t newtid,unsigned success);
 #endif
