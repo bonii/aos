@@ -27,9 +27,7 @@ frame_init(L4_Word_t low, L4_Word_t high)
     sos_address_t prev, current;
     // if we arrive at low, the memory is full
     prev.val = low;
-    printf("test1\n");
     *(prev.ptr) = 0;
-    printf("test2\n");
     // link the entire memory
     for (prev.val = low, current.val = prev.val+PAGESIZE; 
 	    current.val < high;
@@ -41,12 +39,14 @@ frame_init(L4_Word_t low, L4_Word_t high)
     lastFree = prev;
 }
 
+/*
+ * Set the new_low value a frame below new_low is not allocated
+ * This is because the page table is stored from low -> new_low
+ */
 void
 set_new_low(L4_Word_t new_low)
 {
-    printf("test1");
     low_boundary = new_low;
-    printf("test2");
 }
 
 /*

@@ -21,8 +21,6 @@ extern size_t
 sos_read(void *data, long int position, size_t count, void *handle);
 
 size_t
-send_message_to(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, size_t count);
-size_t
 send_message_with_info(L4_Word_t info, L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, size_t count, L4_ThreadId_t receiveReplyFrom);
 
 void

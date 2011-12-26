@@ -32,6 +32,9 @@ ttyout_init(void) {
 	assert (console >= 0);
 }
 
+/*
+ * Helper function to send message to pager to unmap all L4 pages(milestone 2)
+ */
 void
 sos_debug_flush(void)
 {
@@ -46,46 +49,10 @@ sos_debug_flush(void)
 	}
 }
 
-size_t
-send_message_to(L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, size_t count)
-{
-	// send to syscall in chunks of 5 words 
-	// so that we use all 6 ARM registers
-	//for (i = position; i < count;) // well looks like this is not what position is for.
-	int i = 0;
-	for (i = 0; i < count;) // i incremented in the loop 
-	{
-	   	L4_Msg_t msg;
-		L4_MsgClear(&msg);
-		L4_Set_MsgLabel(&msg, MAKETAG_SYSLAB(MsgLabel));
-		// add the words to the message
-		for (int j = 0; j < WORDS_SENT_PER_IPC && i < count; j++)
-		{
-			// initialize to 0 so we send 0-chars if the message 
-			// is not word-padded
-			L4_Word_t word = 0;
-			// add bytes one by one
-		    	char* writeTo = (char*) &word;
-		    	for (int k = 0; k < sizeof(L4_Word_t) && i < count; k++)
-		    	{
-				*(writeTo++) = data[i++];
-			}
-			L4_MsgAppendWord(&msg, word);
-		}
-
-		L4_MsgLoad(&msg);
-		L4_MsgTag_t tag = L4_Send(receiver);
-		if (L4_IpcFailed(tag)) {
-		    // FIXME: actually useful debug message
-		    L4_KDB_PrintChar('E');
-		    L4_KDB_PrintChar('S');
-		    L4_KDB_PrintChar('M');
-		    break;
-		}
-	}
-	return i;
-}
-
+/*
+ * Helper function which sends a large data by breaking it into identical small message and
+ * sending it
+ */
 size_t
 send_message_with_info(L4_Word_t info, L4_ThreadId_t receiver, L4_Word_t MsgLabel, const char* data, size_t count, L4_ThreadId_t receiveReplyFrom)
 {
@@ -164,9 +131,10 @@ sos_read(void *vData, long int position, size_t count, void *handle)
 {
 	size_t i;
 	char *realdata = vData;
-	for (i = 0; i < count; i++) // Fix this to use your syscall
-		realdata[i] = L4_KDB_ReadChar_Blocked();
-	return count;
+	/*	for (i = 0; i < count; i++) // Fix this to use your syscall
+		realdata[i] = L4_KDB_ReadChar_Blocked();*/
+	i = read(console,realdata,count);
+	return i;
 }
 
 /*void
