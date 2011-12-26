@@ -23,7 +23,10 @@ static timestamp_t timestamp_counter = 0;
 
 static sleep_queue_entry_t sleep_queue[SLEEP_QUEUE_SIZE];
 static int sleep_queue_entries = 0;
- 
+
+/*
+ * Init function to initialise the timer
+ */ 
 int start_timer(void) {
   if(clock_initialised) {
     return CLOCK_R_OK;
@@ -44,14 +47,13 @@ int start_timer(void) {
     L4_Word_t *taddress = (L4_Word_t *) address;
     *taddress = 0xfff;
 
-    /*address = (L4_Word_t)NSLU2_OSTS_PHYS_BASE + (L4_Word_t)OSTS_STATUS_REG;
-    L4_Word_t *timer_address = (L4_Word_t *) address;
-    *timer_address = 0x02;*/
-
     return CLOCK_R_OK;
   }
 }
 
+/*
+ * Function invoked by the rpc thread to register a thread in the sleep queue
+ */
 int register_timer(uint64_t delay, L4_ThreadId_t client) {
   if(!clock_initialised) {
     return CLOCK_R_UINT;
@@ -76,13 +78,15 @@ int register_timer(uint64_t delay, L4_ThreadId_t client) {
     L4_Word_t address = (L4_Word_t)NSLU2_OSTS_PHYS_BASE + (L4_Word_t)OSTS_TIMER1_RL_REG;
     L4_Word_t *timer_address = (L4_Word_t *) address;
     *timer_address = (L4_Word_t)(NSLU2_US2TICKS(delay)) | 0x03;
-    //We need the general counter to count down now
     return CLOCK_R_OK;
   } else {
     return CLOCK_R_FAIL;
   }
 }
 
+/*
+ * Function which returns the current accumulated value of time since boot
+ */
 timestamp_t time_stamp(void) {
   if(clock_initialised) {
     L4_Word_t *timer_address = (L4_Word_t *) NSLU2_OSTS_PHYS_BASE;
@@ -92,6 +96,9 @@ timestamp_t time_stamp(void) {
   }
 }
 
+/*
+ * Function to stop the timer which clears up the sleep queue
+ */
 int stop_timer() {
   if(!clock_initialised) {
     return CLOCK_R_UINT;
@@ -114,6 +121,9 @@ int stop_timer() {
   }
 }
 
+/*
+ * Function invoked when the timestamp timer interrupt is received to update the time
+ */
 void handle_timer_timestamp_interrupt(void) {
   timestamp_counter++;
   L4_Word_t address = (L4_Word_t)NSLU2_OSTS_PHYS_BASE + (L4_Word_t)OSTS_STATUS_REG;
@@ -121,17 +131,13 @@ void handle_timer_timestamp_interrupt(void) {
   *timer_address = 0x04;
 }
 
+/*
+ * Function invoker on timer interrupt to handle sleep queue wakeup
+ */
 void handle_timer_interrupt(void) {
-  /*  L4_Word_t address = (L4_Word_t)NSLU2_OSTS_PHYS_BASE + (L4_Word_t)OSTS_TIMER1_RL_REG;
-  L4_Word_t *taddress = (L4_Word_t *) address;
-  *taddress = 0xffffffff;
-
-  address = (L4_Word_t)NSLU2_OSTS_PHYS_BASE + (L4_Word_t)OSTS_STATUS_REG;
-  volatile L4_Word_t *timer_address = (L4_Word_t *) address;
-  *timer_address = 0x02;*/
-  
   timestamp_t now = time_stamp();
   timestamp_t min = 9999999999999;
+  //We need to find if any of the sleep time is over and then again go to sleep
   for(int i=0;i<sleep_queue_entries;i++) {
     if((now-sleep_queue[i].start_time) >= sleep_queue[i].sleep_time_us) {
       //We need to evict it
@@ -157,8 +163,4 @@ void handle_timer_interrupt(void) {
   address = (L4_Word_t)NSLU2_OSTS_PHYS_BASE + (L4_Word_t)OSTS_STATUS_REG;
   volatile L4_Word_t *timer_address = (L4_Word_t *) address;
   *timer_address = 0x02;
-
-
-  //We need to iterate over the list and empty it
-  
 }
