@@ -1,0 +1,374 @@
+\documentclass[a4paper, 11pt]{article}
+
+\title{Advanced Operating Systems 2011}
+
+\author{Vivek Shah \\Department of Computer Science, ETH Zurich \\
+\texttt{bonii@student.ethz.ch}}
+
+\include{preamble}
+
+\begin{document}
+    
+\maketitle
+\newpage
+\tableofcontents
+\newpage
+
+\section{Abstract}
+As part of the course Advanced Operating Systems \cite{os-project},
+the goal of the project is to build an operating system on top the
+minimal L4 microkernel \cite{l4}. The aim of the project is to build
+the virtual memory system, file-system, system call interface, process
+call interface, elf loader(to load executable files in ELF \cite{elf}
+format from
+the file-system) and a timer driver. It can be already be seen that the
+system can be perceived as quite modular where L4 provides the
+necessary hardware abstraction and the other operating system features
+are built up as multiple services over it which allows an ideal
+composition of complexity(design of simple operation system) and
+simplicity(services provided by L4). 
+
+This report is divided into multiple sections. Firstly, I will give a
+small introduction to the project which builds up on this
+abstract. Then I will proceed to the technical details of the
+interesting parts of the system to provide a broad insight into the
+design and implementation of the system. I will point out any known
+bugs/limitations in the system in the corresponding section. Finally,
+I will try to sum up the overall picture of where the system stands
+and hopefully it will not be obnoxious enough. 
+
+\newpage
+\section{Introduction}
+Operating systems are considered to be the hobgoblins of systems. They
+are almost inconspicuous and provide necessary abstractions to the application
+programs. While monolithic kernel designs follow a very stringent
+demarcation of a system and an application program, in a microkernel
+approach this line becomes a bit blurred. In this project, a simple
+operating system has been designed and implemented as a server on top
+of the L4 microkernel whose services the client(application programs)
+can access using the system call interface exposed in the file
+``libs/sos/include/sos.h''.  In this project, the L4 Pistachio microkernel
+\cite{l4-pistachio} has been used. The simple operating({\bf SOS}) system been
+developed and tested using NSLU2 (Network Storage Link for USB 2.0)
+disk drives \cite{slug} produced by Linksys. The device belongs to the
+ARM architecture family \cite{arm-manual} and more details concerning
+the hardware design are outlined in the hardware developer reference manual 
+\cite{slug-manual}. There are some good references available for the
+L4 microkernel used in this project which have been of great help. The L4
+user manual \cite{l4-usermanual} and the L4 kernel reference manual
+\cite{l4-manual} are especially noteworthy.
+
+SOS is a multi-threaded kernel(2 to be precise). One of the threads
+has been designed to specifically handle system call messages(we will
+refer to it as the rpc task). I will also use the term roottask for
+the SOS kernel threads to avoid confusion since SOS is present atop L4 
+microkernel. It is
+the server to which the client programs using the sos library send
+their service requests. All modes of data transfer between threads not
+sharing address space use extensive message passing using L4 IPC
+message passing mechanism. SOS implements the following operating
+system features and/or abstractions over the L4 microkernel
+\begin{itemize}
+\item Virtual memory system, a virtual memory for the heap, stack and
+  code segments with demand paging. Demand paging uses the second
+  chance page replacement algorithm where the reference and dirty bits
+  of pages are implemented in the software(pager). SOS uses an
+  inverted page table design to achieve virtual memory support.
+\item System call interface which is exposed to the application
+  programs through the ``sos'' library which allows the
+  applications(clients) to send specific service requests to the
+  operating system.
+\item File system interface which provides a file system abstraction
+  over the low level NFS file system \cite{nfs-rfc} and converts the 
+  asynchronous NFS
+  operations into synchronous file operations as defined in the file
+  system interface. It is important to note here that the SOS file
+  system follows a flat directory structure.
+\item A timer device driver which utilizes the timer hardware present
+  in the NSLU2 slug in order to provide the time related system calls.
+\item A process call interface which provides abstractions for the
+  application programs to create, run, wait and kill processes which
+  are binary images in the file system.
+\end{itemize} 
+
+\subsection{Segmentation of work by root-task threads}
+
+Write about the constants in files 
+Write about the NFS\_READ and WRITE sizes are 256
+\newpage
+\section{Memory System}
+SOS has an available RAM of around 22 MB(on the slug) which it detects
+while bootstrapping the roottask and divides it into frames
+of size 4096 which is the page size. The page size is configurable. However,
+it exposes a virtual memory of much larger size to the application
+programs and provides this service using demand paging. There are
+several page table designs which store the mapping from the virtual
+memory address to the physical memory address mapping. For SOS, I have
+chosen the inverted page table design. It is very scalable since it
+scales according to the size of the physical memory instead of the
+virtual memory. It is important to note that when a memory access
+fault occurs (either the permission to access the memory location is
+incorrect or the memory location is not present in L4 mappings), L4
+kernel registers an interrupt and delegates this work to the root-task
+syscall loop thread which is responsible for handling those interrupts
+by invoking the pager method in ``sos/pager.c''. The memory pages have
+been implemented as a linked list of frames where each frame contains
+a link to the next available frame. This implementation of allocating
+and de-allocating a frame is present in ``sos/frames.c''. The memory
+systems also adds a guard page between the heap and stack which is
+mapped to the physical address 0 and would fault when it is accessed.
+
+\subsection{Page Table Structure}
+SOS uses an inverted page table design which stores the virtual
+address(page number) and process id and the index of the page table
+stores implicitly the physical frame address. The inverted page table
+design has been followed as outlined in the book
+\cite[Page~395]{tanenbaum}.  Ideally it should be
+hashed so that we must not do a lookup of the entire page table
+however owing to time constraints a hashed table has not been
+implemented and a performance hit has been taken. On the positive
+side, it can be argued that the design and implementation remains
+simple and for a page table with around 5500-6000 entries which is the
+case for the NSLU2 slug, the performance hit is not catastrophic.
+
+The page table is not stored in the roottask's memory space but is
+stored using the physical frames itself. It has been done because it
+makes the system highly scalable even if there is a large amount of
+memory available, the roottask's memory space remains free. Since the
+size of the page table is not huge, storing it using the frames does
+not cause available space issue. In addition the size of the page
+table is computed dynamically using the the values of size of physical
+memory available and the size of each page table entry. This generates
+an optimum size of the page table which is then reserved using the
+frames. 
+
+Each page table entry is of type {\bf struct sos\_PTE} which in
+addition to the virtual page number and the process id contains
+additional helper structure for implementing demand paging. The
+structure of the page table entry is documented in the header file
+``sos/pager.h''. In addition, the swap table is an additional data
+structure which contains entries pertaining to memory chunks which are
+currently in the swap file.
+
+\subsubsection{Advantages and Disadvantages}
+An inverted page table design has all the advantages as mentioned in
+the book \cite[Page~395]{tanenbaum}. What I would mention here are the
+pros and cons of not having a hashed inverted page table. The
+advantages are
+\begin{enumerate}
+\item The implementation is simple and fast.
+\item For a small page table size the difference in searching the entire
+  page table and some sections of the page table(hashed page table) is
+  quite small if not negligible
+\end{enumerate}
+The disadvantages are
+\begin{enumerate}
+\item The system will not scale well in case of increased RAM.
+\end{enumerate}
+ 
+\subsection{Swap Table Structure}
+Since the size of the physical memory is quite small compared to the
+size of the virtual memory, sooner or later physical memory would be
+completely used up while there would be demand for more virtual
+memory. In such a case we would have to use a page replacement
+algorithm where a page which is currently in the page table is evicted
+from the page table and written to the swap and the new page which is
+demanded is put in the page table. The swap table contains the mapping
+of the virtual memory pages and the offset where they are currently in
+the file. So, it can be viewed as a page table where we store the
+offset in the filesystem instead of the physical address of the frame.
+
+In principle, the page table datastructure can be used to store the
+swap table entries as well but that is an overkill since the page
+table datastructure contains additional helper structures for demand
+paging which is not required for swap table. The swap table
+datastructure is of type {\bf sos\_swap} which is documented in the
+header file ``sos/pager.h''. Each swap entry, contains a link to the
+index of the next free entry which gives performance speed up for
+allocating and freeing a swap table entry. The size of the swap table
+is also static and is configurable through constant {\bf
+  MAX\_SWAP\_ENTRIES} defined in ``sos/pager.h''. The swap file called
+{\bf swapfile} is created in the NFS exported directory by the
+roottask while bootstrapping. In case it is not created while
+bootstrapping, the pager creates the file when it needs access to
+it. The size of swapfile is upper bounded so each swap table entry
+reuse their file offsets in the swapfile.
+
+\subsubsection{Possible Design Issue and Enhancement}
+When the swap table runs out of space i.e. all the swap table entries
+are full then it cannot allocate the memory requested by the page
+faulting process and hence the process would keep on page faulting
+until some other process terminates. A possible enhancement can be to
+decide whether to terminate the process or freeze it i.e. maintain a
+list of such processes which are moved from run status to a non-run
+status by not sending them a reply message. When an entry in swap or
+page table frees up, they are moved from the non-run to run status.
+
+\subsection{Demand Paging}
+As we have seen previously, there would be scenarios where a page
+table entry would need to be written to a swap file and read from it
+when required. Based on the various order and type of memory accesses,
+there can be multiple scenarios which be possible which are
+\begin{enumerate}
+\item Memory access where the access restrictions to the memory do not
+  match
+\item Memory access where the virtual memory is not mapped to the
+  physical memory and there are available physical frames.
+\item Memory access where the virtual memory is not mapped to physical
+  memory and there are no available physical frames.
+\item Memory access where the virtual memory is mapped to physical
+  memory and the mapped page is present in page table.
+\item Memory access where the virtual memory was mapped to physical
+  memory and the mapped page is present in swap table and the page
+  table is not full.
+\item Memory access where the virtual memory was mapped to physical
+  memory and the mapped page is present in swap table and the page
+  table is full.
+\end{enumerate}
+The basic algorithm to handle the cases can be outlined by the
+flowchart in figure \ref{pagefault-fig}. It is to be notes that the
+roottask in the figure symbolizes the syscall-loop thread which is
+responsible for handling interrupts for page faults. The algorithm also
+handles cases where the low level swap file read and write can fail
+owing NFS failure and handles those situations gracefully. For the
+sake of clarity, those cases have not been depicted in the algorithm.
+It is also to be noted, that although the NFS read and writes are
+asynchronous the pager does not block until they are completed but
+from the point of view of the application which page faulted it is
+blocked since the roottask does not reply to it until it has resolved
+the NFS reads/writes if issued. While the NFS read/writes are taking,
+the corresponding page table entries are locked so that they are not
+evicted by the page replacement algorithm as this will cause
+inconsistent system state.
+\begin{figure}
+\begin{center}
+\includegraphics[scale=0.55]{pagefault.png}
+\end{center}
+\caption{Algorithm to handle page faults}
+\label{pagefault-fig}
+\end{figure}
+
+\subsection{Implementing reference and dirty bits in software}
+The algorithm outlined in figure \ref{pagefault-fig} details the broad
+overview how page faults are dealt with demand paging. Since the ARM
+hardware does not provide us with hardware managed reference and dirty
+bits for pages, we need to do it ourselves. The dirty bit is set when
+a page was written to since the time it was loaded from swap or loaded
+for the first time. So, if a page is set without a write access, then
+every write access to it would cause a page fault and hence we would
+be able to set the dirty bit. This is precisely what is done in the
+implementation. A page is provided with write access only if it is
+present in the page table since then a page fault implies permission
+fault. Whenever a page is mapped into the page table either for the
+first time or from the swap, it is always mapped with only read
+access. This keeps the algorithm logic simple. The only down-sight to
+it is that if the first access to a page is write access, it will be
+mapped through 2 page faults but that is not a big performance
+delimiter. A page is considered to be referenced whenever any access
+is made to it. This reference bit is used by the second chance page
+replacement algorithm to determine the page table entry that would be
+evicted.
+
+\subsection{Page Replacement Algorithm}
+For the algorithm presented in figure \ref{pagefault-fig}, it is
+important to select a suitable target page table entry which needs to
+be evicted. SOS implements a second chance page replacement algorithm
+as described in \cite[Page~399]{tanenbaum}. This algorithm checks the
+reference bits and if a page was referenced then it is given a second
+chance and not evicted but the reference bit is cleared. A page with a
+clear referenced bit is evicted. In addition a pinned bit is present
+for each page table entry to signify that the corresponding entry
+should never be evicted. It is not same as page table entry lock done
+on read and write to swap file. The implemented algorithm can be
+outlined by the following steps
+\begin{enumerate}
+\item Iterate over the page table entries infinitely. For each entry
+\item Check if the reference bit is 0. If the reference bit is 0 and
+  the page pinned bit is 0 and the page table entry is not being
+  currently updated then return the page table entry as the entry to
+  be evicted else go to next step.
+\item If the page table entry is not being updated and the reference
+  bit is set to 1 then clear the reference bit and unmaps the page so
+  that we can know if it is referenced through a page fault.
+\item If all the page table entries in a full cycle of traversal are
+  being updated then exit from loop with an invalid index to signal no
+  entry found for eviction else the algorithm will be stuck in
+  infinite loop as it will not be able to service the NFS callbacks
+  which are the only way a page table update lock can be freed up.
+\end{enumerate}
+The page replacement algorithm is quite simple to understand and easy
+to implement. Every invocation of the algorithm begins the search from
+the index where it terminated in the previous invocation and this can
+be easily achieved using a static variable.
+
+\subsubsection{Bug}
+If all the pages in the page table are pinned then the algorithm would
+go into infinite loop. This bug has been discovered right now while
+looking at the code for documentation. It can be easily fixed by
+adding a simple condition to check that if all page table entries in a
+full cycle of traversal are being updated or pinned then the algorithm
+must abort.
+\subsection{Write to swap and Read from swap}
+The NFS read and writes are asynchronous and also they need to be done
+in small chunks rather than a huge chunk all at once. In SOS, NFS read
+and writes are done in chunks of 256 bytes. While the roottask pager
+method cannot block for completion of NFS read/writes, the page
+faulting application must block until the corresponding read and
+writes are completed. This is solved by using callback functions as on
+NFS read write completion the associated callback function is
+executed. In order to maintain state so that corresponding action can
+be taken on receiving callbacks, the necessary state information is
+passed as tokens to the NFS read and write calls. On completion of the
+NFS read and write calls, the corresponding callbacks are invoked with
+the appropriate tokens. The token used for a swap write and swap read
+is of type {\bf struct page\_token}. Its fields have been documented
+in the file ``sos/pager.h''. In case of a swap write followed by a
+swap read, the swap write callback issues the necessary NFS
+read. While the swap write and/or read are performed, the page table
+entries are locked so that they are not evicted(used) for other page
+faults. 
+\subsection{Pinning pages}
+Page table entries can be marked as pinned so that they cannot be
+evicted. If a page is marked as pinned then the page replacement
+algorithm ignores them and does not consider them for eviction. Such
+pinning is useful for preventing eviction of memory buffers in
+asynchronous requests so that those buffers are not paged
+out. Also, code segment pages are pinned in the page table. Currently,
+in SOS no method has been exposed to allow client libraries to pin
+memory buffers in asynchronous requests owing to time constraints but
+they can be easily added since the pinning mechanism is already in place.
+\newpage
+\section{Process Management}
+In SOS every process is a single thread of execution. A process does
+not have more than one thread of execution. In SOS, each process is a
+L4 thread. The process abstraction presents an abstracted view to the
+client application and presents a convenient interfact to present
+manipulate process states. The various process states are
+\begin{enumerate}
+\item Created - The process has been created but it cannot run since
+  its code segment has not been loaded.
+\item Ready - The process is ready to run.
+\item Waiting - The process is waiting for some other or any process
+  to terminate.
+\item Sleeping - The process wants to wait for a specific time
+  interval rather than on process termination.
+\item Killed - The process has been removed from the system. Its code
+  segment has been unloaded and the memory it occupied has been
+  removed.
+\end{enumerate}
+
+\begin{figure}
+\begin{center}
+\includegraphics[scale=0.5]{process-states.png}
+\end{center}
+\caption{Process states}
+\label{process-states-fig}
+\end{figure}
+
+The possible transitions among these process states in SOS can be
+depicted by figure \ref{process-states-fig}
+
+\newpage
+\bibliographystyle{abbrv}
+\bibliography{report}
+\end{document}
