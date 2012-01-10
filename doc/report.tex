@@ -48,7 +48,7 @@ operating system has been designed and implemented as a server on top
 of the L4 microkernel whose services the client(application programs)
 can access using the system call interface exposed in the file
 ``libs/sos/include/sos.h''.  In this project, the L4 Pistachio microkernel
-\cite{l4-pistachio} has been used. The simple operating({\bf SOS}) system been
+\cite{l4-pistachio} has been used. The simple operating system({\bf SOS}) been
 developed and tested using NSLU2 (Network Storage Link for USB 2.0)
 disk drives \cite{slug} produced by Linksys. The device belongs to the
 ARM architecture family \cite{arm-manual} and more details concerning
@@ -92,15 +92,30 @@ system features and/or abstractions over the L4 microkernel
 \end{itemize} 
 
 \subsection{Segmentation of work by root-task threads}
-
-Write about the constants in files 
-Write about the NFS\_READ and WRITE sizes are 256
+As mentioned earlier, SOS is multi-threaded and it consists of 2 roottask
+threads which are responsible for specific functionality. I will refer
+them as the syscall loop thread and rpc thread. The rpc thread is
+responsible for listening to system call requests from the client
+processes. The syscall loop thread has the following responsibilities
+\begin{enumerate}
+\item Handling interrupts
+\item Handling process kill message so that memory chunks of killed
+  process are removed from page table. This message is sent by rpc
+  thread. The rpc thread avoids doing this in order to avoid buffer locking
+  problems.
+\item Handling SOS library bootstrap message. When SOS library starts
+  up it sends a message to its parent which is the syscall loop thread
+  inquiring about the rpc thread id.
+\item Handling message to flush all L4 mappings. This is not useful
+  from the point of view of SOS anymore and is present as a vestige of a
+  feature implemented as part of the pager milestone \cite{os-project2}.
+\end{enumerate}
 \newpage
 \section{System calls}
 System calls are mechanisms provided by the operating systems using
 which client applications can request the operating system for
 specific services. Since the client process is a different thread to
-the OS threads, it is a form of remote procedure call where the client
+the operating system threads, it is a form of remote procedure call where the client
 thread gets work done through the operating system threads. It
 involves inter process communication between the client and SOS server
 threads. There are situations where the system call invoked by the
@@ -109,7 +124,7 @@ threads for eg. NFS calls. In such situations, the roottask should not
 block itself but rather the blocking would be done by the client
 thread as it would wait for server thread to reply. The roottask only
 replies when all the asynchronous work is done. The roottask would
-services a specific system call completely if it needs no asynchronous
+service a specific system call completely if it needs no asynchronous
 library calls even though there may be multiple concurrent system
 calls. The system call interface is well defined in the form of the
 services in the file ``libs/sos/include/sos.h''. The corresponding
@@ -120,11 +135,268 @@ respectively. The implementation and header of the callback functions used by th
 server side system call are present in ``sos/sos\_rpc\_callbacks.c'' and
 ``sos/sos\_rpc\_callbacks.h''. 
 \subsection{System calls Architecture}
+The system calls proceed by message passing between the client sos
+library and the rpc thread which is responsible for servicing those
+system calls. Each message contains a label defined in
+``helpers/ipc\_defs.h''. Based on the message label the rpc thread
+identifies the type of the system call and takes the necessary
+action. Since there is a limit on the amount of data that can be
+packed in one message, some system calls send multiple messages to the
+rpc thread to transmit the data and the server utilises a similar
+mechanism where necessary. The client libraries present in
+``libs/sos/src/sos.c'' first bootstraps itself to discover the rpc
+thread id by sending a query message to the syscall loop thread. It
+needs to do this since it needs to find the rpc thread id to which it
+needs to send messages. For all system calls, the client library sends
+a message to the rpc thread and blocks for a reply or multiple replies
+until the system call is over. The rpc thread is responsible for
+handling the system call messages directed towards it through the
+\textit{rpc\_thread} function defined in ``sos/sos\_rpc.c''. This
+function is responsible for determining the type of message and
+delegating work to other helper functions. The basic architecture has
+been outlined in figure \ref{systemcall-fig}.
+\begin{figure}
+\begin{center}
+\includegraphics[scale=0.45]{systemcall.png}
+\end{center}
+\caption{System call handling architecture}
+\label{systemcall-fig}
+\end{figure}
+In the figure \ref{systemcall-fig}, all messages from the client
+library are shown as directed at the rpc thread. However, there is one
+message which is sent to the syscall-loop thread which finds the rpc
+thread id to which subsequent messages will be sent. This is
+implemented in the ``sos\_init'' function which is defined in
+``libs/sos/src/sos.c''. In some cases, the rpc thread replies back to
+the client application while in other cases the syscall loop thread
+replies back. A possible mechanism which can be exploited is to
+forward the reply by the syscall loop thread to the rpc thread
+however, there do not seem to be any immediately apparent advantage or
+disadvantage of this approach and hence it has not been explored.
+
 \subsection{Passing data in system calls}
+In order to pass data in system calls, the data has to be passed
+between two different L4 process, the client process and the rpc
+thread. In order to do so, the inherent L4 message passing mechanism
+is used. If a message can be packed into one L4 message then the message
+is split and packed into multiple message registers of the L4 message
+and sent else a message is split up into multiple L4 messages.
 \subsection{File system interface}
+SOS implements a flat file system atop the low level NFS file
+system. It provides the necessary file system interface exported
+through the system call interface. The file system interface is a
+subset of the system call interface which allows the client library to
+specify operations on the file. SOS implements the file descriptors
+and the access permissions to them but it does not implement the low
+level file structure in the file system. It uses NFS to do the low
+level file manipulation for it. So, in a way SOS provides the file
+descriptor view and access permissions and implements a blocking
+interface for file operations as compared to the non blocking NFS
+calls.
+
+SOS handles regular files which are the files in the file system and a
+console file which is the serial console for output and
+input. Multiple processes can write to a console but only one process
+can read from it currently. However, multiple process can read from
+the console by changing the constants. A regular file can have
+multiple processes reading and writing to it. It is to be noted though
+that in SOS, when a file is opened for reading and writing, the
+reading offsets and writing offsets are initialised at 0 and the end
+of the file at the time of opening. Also, if a file is opened in read
+mode, a size field at the time of opening the file determines the range
+till where it must read. This size field is set to the size of the
+file at the time of opening the file.
+
+\subsubsection{File Descriptor Table}
+SOS needs to store the file descriptors which the client library uses
+to specify access to files. It also needs to maintain which threads
+have access to which file descriptors so that there are no access
+violations. For this it maintains a token table, file descriptors are
+internally referred in SOS as tokens to reflect that processes must
+hold specific tokens to access the resources. A token or file
+descriptor is of type {\bf Token\_Descriptor\_t} and is defined in the
+file ``sos/sos\_rpc.h'' and contains the following fields
+\begin{enumerate}
+\item The filename for which the token was issue.
+\item Read and write count which contain the counts of the number of
+  threads holding the token for read and write.
+\item Access count which contains the total number of threads having
+  access to the token. This is required as some threads can hold a
+  resource both for reading and writing.
+\item A list of access records which contains which thread has this
+  token for read/write/both access and what are the specific write
+  offsets and max read offsets for those threads. It is of type {\bf
+    Token\_Access\_t} and is defined in the file ``sos/sos\_rpc.h''.
+\end{enumerate}
+
+\textit{Token\_Descriptor\_t contains a field token which is not used in
+the code but was not removed from the existing code}. The token value
+is an index so that a particular token can be identified in the token
+table and also the thread which holds it, can be identified in the access
+list of the token. So the actual token is a combination of 2 indices.
+
+The file descriptor table is of static size and can be configured
+through the constant ``MAX\_TOKENS''. In addition, there is a limit on
+how many processes can access a token which can be configured through
+the constant ``MAX\_ACCESSESS''. Both these constants are present in
+the file ``sos/sos\_rpc.h''. The file descriptor table is manipulated
+on receiving the open and close system calls.
+
+\subsubsection{NFS library use}
+Since SOS uses the NFS library for the low level file accesses, it is
+careful to transfer small buffers for NFS read and writes. This is
+necessary because otherwise NFS just ignores the request. Thus all NFS
+read and writes are broken down to buffer size of 256 bytes. There was
+no particular reason for choosing 256 other than it gave a
+satisfactory performance and is an average buffer size i.e. neither
+too big nor too small.
+
+\subsubsection{Open and Close system calls}
+When the client library issues an open system call, the rpc thread
+checks if the resource has already been opened once. If not it tries
+to allocate an entry in the token table. If the token table is not
+full and the resource is not opened yet, it adds an entry for it and
+adds the thread in its list of accesses, else the thread is just added
+to the access list if the access limit is not violated. In case of
+console access, the thread is registered in the list of listeners for
+console interrupt if the open system call was issued for console
+read. If the open system call was issued for a file which does not
+exist in the file system then the file is created. The close system
+call does the reverse where it removes the thread from the access list
+of the token and also decrements the corresponding access, read and
+write counts. In the token table, an entry is considered to be free if
+the access count of the file descriptor is 0. 
+
+ All the read and write
+system calls first check if the thread requesting the resource with
+the token actually have access to it. It also checks whether a thread
+is trying to spoof a token it does not have. All the server end
+implementation of system calls are present in the file
+``sos/sos\_rpc.c''. I would not go into algorithmic description of the
+other system calls as they can be easily followed from the code.
+
+\subsubsection{Enhancement}
+The server end implementation of ``sos/sos\_rpc.c'' utilises a lot of
+repetitive messaging constructs which can be better structured but
+need to be carefully thought out in the presence of global variables
+and asynchronous calls. This should be done in SOS and can be viewed
+as TODO which was not done owing to time constraints.
+
 \newpage
-\section{Device Driver}
-\subsection{Clock driver}
+\section{Clock Driver}
+Device drivers are programs which allow higher level programs or
+applications to interact with hardware devices. SOS implements a
+simple clock driver to use the high resolution timer cells on the
+slug. The timer registers in the slug are memory managed. The timer
+registers are all present in the page {\bf NSLU2\_OSTS\_PHYS\_BASE}. The
+details of the hardware are outlined in \cite[Page
+  411]{slug-manual}. The memory managed registers used by SOS have
+been defined below
+\begin{itemize}
+\item {\bf OSTS\_TS} is the timer register which gives the number of
+  ticks elapsed.
+\item {\bf OSTS\_STATUS\_REG} is the status register which is used to
+  reset the status of the time stamp timer and the timer register. 
+\item {\bf OSTS\_TIMER1\_RL\_REG} is the timer reload register which is
+  used to set how after how long the interrupt will be generated to
+  implement sleep queues. 
+\item All the memory mapped registers mentioned above are offsets in
+  NSLU2\_OSTS\_PHYS\_BASE page. However, the offset of OSTS\_TS is 0 and
+  in \textit{time\_stamp} function instead of adding it to the page value, the
+  page value is used directly. That does not affect the code
+  functionality but affects readability. This has been noticed while
+  writing the documentation and should be corrected.
+\end{itemize}
+The details of the clock driver and various pertinent implementation
+specifics have been discussed in the following sections. The interface
+for the client library is defined in the file
+``libs/clock/include/clock.h''. The implementation of the defined
+interface which is the device driver is present in
+``libs/clock/src/clock.c''. It is to be noted that the device driver code
+implemented in the previously mentioned file must be executed by a
+privileged process and hence the roottask must execute it. The user
+interface to the clock library are the {\bf time and sleep} system
+calls which send a message to the rpc thread and then the rpc thread
+executes the device driver library before replying back. 
+\subsection{Registering Interrupts and Delegation}
+A device driver functions through interrupt handling where one
+specifies which interrupts are for a specific device. When L4 receives
+interrupts for those device which have been registered with it, it
+delegates the work to the interrupt handler. Since the syscall loop
+thread is responsible for receiving registered interrupt messages from
+L4 , it checks if the registered interrupts are for the timer
+device. If it is so, it invokes the corresponding interrupt handler
+routine in the clock driver based on the type of the interrupt. In
+order to enable the clock driver interrupts, the clock driver
+registers its interrupts with L4 at initialisation in the
+\textit{start\_timer} function which is invoked by roottask while
+bootstrapping. An interrupt by the timestamp timer indicates that the
+timestamp timer has reached its maximum value and so the clock driver
+must register the number of times the timestamp timer has completed
+its cycle to compute the current time. An interrupt by the countdown
+timer indicates it has counted down to 0. It is used to implement
+sleep queues to set the time when the sleep queue must be examined to
+wake up processes. These are the 2 interrupts that are registered by
+the clock driver. The handler for timestamp timer interrupts is the
+\textit{handle\_timer\_timestamp\_interrupt} function. It registers
+the number of such interrupts received which will be used to compute
+the timestamp value and resets the timestamp timer. The handler for
+the timer interrupt is the \textit{handle\_timer\_interrupt} function
+which determines if the sleep time of an entry in sleep queue is
+over. In that case it sends the corresponding process a message to
+wake up. Then, it determines, the time to count down for the next
+timer interrupt to be generated and sets that value in the timer
+register. It then resets the status reload register for the
+countdown. Currently, in SOS the timer counts down with maximum
+possible register value even if the sleep queue in empty. This should
+be changed to disable the timer if the sleep queue is empty. This
+would be more efficient.
+\subsection{Sleep queue}
+In order to implement the sleep system call, the clock driver needs to
+maintain a list of processes which have issued the sleep system call
+and their sleep times. It implements a sleep queue data structure
+whose entry is of type {\bf sleep\_queue\_entry\_t} and is defined in
+``libs/clock/include/clock.h''. It has the following fields
+\begin{enumerate}
+\item Tid of the sleeping process
+\item Time when the process started sleeping (start\_time)
+\item Time for which the process wanted to sleep (sleep\_time\_us)
+\end{enumerate}
+The queue is a FIFO queue where new sleep entries are registered at
+the end of the queue. So, insertion in the queue is very quick. When a
+timer interrupt is received, the entire list is searched for the
+smallest sleep time remaining and the timer is set to that value. If
+the value is greater than the timer's maximum countdown value then the
+timer's maximum value is the countdown value. Also, if someone's sleep
+time is over, that process is sent a wakeup reply message and evicted
+from the sleep queue and the entire queue is compacted i.e. entries
+after the evicted value are pushed up not to leave holes in
+between. When a process invokes the sleep system call, the client
+library sends a message to the rpc thread, the rpc thread checks if it
+can add the entry to the sleep queue. If it can, it replies back to
+the client application that it was registered and the client
+blocks. The rpc thread in order to add the tid to sleep queue, checks
+the min sleep time in the queue to include the possibility that the
+new process being added can have a smaller sleep time than the
+processes in the queue. If that is the case, it sets the timer
+register accordingly for countdown. Also, since the syscall loop
+thread receives interrupt messages, it is the syscall loop thread which
+replies back to the sleeping thread for wake up. In hindsight,
+compacting the queue is not a good idea, rather adding to the queue
+can check the entire queue if an entry is available. That would be
+much more efficient from a performance point of view. 
+\subsubsection{Bugs}
+Earlier, the syscall loop thread was responsible for adding entries in
+the sleep queue and also evicting it, but now the rpc thread adds
+entries in the queue while syscall loop evicts them. While
+documenting, I noticed there is no locking done on the queue and this
+might lead to race conditions. Also, the compaction is buggy in the
+case where the entry which is next to the entry which is evicted is
+ignored and not examined. This would lead to possible cases where the
+entry next to evicted entry overshoots its requested sleep time.
+This bug can be easily fixed by applying the simple
+patch provided with this documentation
+``0001-Fixed-entry-next-to-evicted-entry-not-examined.patch''. 
 \newpage
 \section{Memory System}
 SOS has an available RAM of around 22 MB(on the slug) which it detects
