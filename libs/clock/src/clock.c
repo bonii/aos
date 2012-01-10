@@ -151,6 +151,9 @@ void handle_timer_interrupt(void) {
 	sleep_queue[j].tid = sleep_queue[j+1].tid;
       }
       sleep_queue_entries--;
+      //We need to examine the entry which was moved up
+      i--;
+      continue;
     } else if(now-sleep_queue[i].start_time < min) {
       min = now - sleep_queue[i].start_time;
     }
