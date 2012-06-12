@@ -120,7 +120,7 @@ thread gets work done through the operating system threads. It
 involves inter process communication between the client and SOS server
 threads. There are situations where the system call invoked by the
 client would need a series of asynchronous calls by the SOS server
-threads for eg. NFS calls. In such situations, the roottask should not
+threads for example NFS calls. In such situations, the roottask should not
 block itself but rather the blocking would be done by the client
 thread as it would wait for server thread to reply. The roottask only
 replies when all the asynchronous work is done. The roottask would
@@ -275,6 +275,14 @@ implementation of system calls are present in the file
 ``sos/sos\_rpc.c''. I would not go into algorithmic description of the
 other system calls as they can be easily followed from the code.
 
+\subsubsection{Using printf and scanf in client libraries} 
+If the client application wants to read/write to/from the serial
+console using the printf and scanf calls which invoke the sos\_write
+and sos\_read functions defined in ``libs/sos/src/ttyout.c'', the
+corresponding \textit{ttyout\_init} function must be invoked first
+which creates a file descriptor to read and write from the console. It
+is to be noted that the \textit{sos\_write and sos\_read function} calls
+internally use the read and write system calls.
 \subsubsection{Enhancement}
 The server end implementation of ``sos/sos\_rpc.c'' utilises a lot of
 repetitive messaging constructs which can be better structured but
@@ -834,6 +842,45 @@ by the pager where it allocates or deallocates a page table entry
 correspondingly updates the size in the process control block. This
 provides a dynamic view of main memory occupied by a process. 
 \newpage
+\section{Summary}
+In essence, SOS achieves the functionality that it initially set
+out. In retrospect, a lot of the features can be redesigned better
+than what it currently is. A lot of the existing functionality is the
+quick and dirty design aspect to meet time-lines but overall the system
+design is stable, effective and enhanceable. The system call
+architecture is efficient as is the clock driver which can/should be
+enhanced as outlined previously. The memory structure (page table and
+swap table) are efficient for the use cases. A hashed page table and
+swap table would be necessary for a larger main memory size from an
+efficiency perspective. The process loading architecture(ELF loader)
+must also be improved to support page wise loading and eviction for
+efficiency. Currently, buffers are not protected from
+being swapped out in asynchronous calls. Although the necessary
+mechanism i.e. pinning is implemented, the roottask does not provide
+interfaces to the client libraries to protect such eviction. So, the
+current problems in the system which have been discussed previously
+\begin{itemize}
+\item Memory access violations by processes does not take any corrective
+  measure. Access is not provided to the processes but the processes
+  are neither aborted or frozen.
+\item When the swap table is out of space, page faulting processes
+  would keep on page faulting
+\item A similar situation occurs if all the entries in a page table
+  are pinned for example by loading code segments.
+\item The entire process image is loaded in the code segment when it
+  can be done on demand. The code segment is pinned as well to prevent
+  eviction which can be done away with by re-structuring the eviction
+  mechanism easily. Currently, I did not implement eviction of code
+  segment owing to lack of time to test the scenario properly.
+\item Sleep queue is buggy where some entries in sleep queue can
+  overshoot and can be easily fixed by the provided patch.
+  Compaction of the sleep queue should be done away with. 
+\item The guard page is mapped to address 0 which is not the best way
+  to go. It should be handled more gracefully. It was just noticed
+  during the documentation which acts as a reminder to do things
+  properly the first time around rather than being clever and
+  delegating for later.
+\end{itemize}
 \section{Acknowledgment}
 Developing SOS has not been a trivial task and it has had its fair
 share of sleepless nights, frustrated keyboard banging and Eureka
@@ -842,7 +889,12 @@ Frederik Mutzel with whom I was initially working on the project. He
 had to drop out owing to health concerns but a lot of the initial
 design was done in conjunction with him. I would also like to
 acknowledge the help of Praveen Shinde and Simon Peter who have always
-helped in providing the right direction and been flexible enough when required.
+helped in providing the right direction and been flexible enough when
+required. I would also like to acknowledge Dr. Timothy Roscoe for
+providing the foundations(teaching) of the course whose practical offshoot is
+this project. Overall, it has been quite satisfying though a bit stressful
+to work on SOS and building SOS has taught me a lot about operating
+system design.
 \newpage
 \bibliographystyle{abbrv}
 \bibliography{report}
