@@ -1,5 +1,6 @@
 /*
  * RPC thread handler. All system call messages are directed first to this handler
+ * Written by Vivek Shah
  */
 #include "sos_rpc.h"
 

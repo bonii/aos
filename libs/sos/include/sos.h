@@ -1,4 +1,6 @@
-/* Simple operating system interface */
+/* Simple operating system interface 
+   Written by Vivek Shah
+*/
 
 #ifndef _SOS_H
 #define _SOS_H

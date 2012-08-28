@@ -1,3 +1,6 @@
+/*
+ * Written by Vivek Shah
+ */
 #ifndef SOS_RPC_CALLBACKS_H
 #define SOS_RPC_CALLBACKS_H
 

@@ -1,3 +1,6 @@
+/*
+ Written by Vivek Shah
+*/
 #ifndef _TTYOUT_H
 #define _TTYOUT_H
 

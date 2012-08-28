@@ -5,7 +5,8 @@
  *      Description: Simple operating system l4 helper functions
  *
  *      Author:		    Godfrey van der Linden
- *
+ *      Modified by:    Vivek Shah
+ * 
  ****************************************************************************/
 
 #ifndef _LIBSOS_H

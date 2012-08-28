@@ -5,7 +5,8 @@
  *      Description: Simple milestone 0 code.
  *      		     Libc will need sos_write & sos_read implemented.
  *
- *      Author:      Ben Leslie
+ *      Original Author:      Ben Leslie
+ *      Author:               Vivek Shah
  *
  ****************************************************************************/
 

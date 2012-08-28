@@ -3,6 +3,7 @@
  * Orignally written by Gernot Heiser 
  * - updated by Ben Leslie 2003  
  * - updated by Charles Gray 2006
+ * - updated by Vivek Shah 2012
  */
 
 #include <assert.h>
